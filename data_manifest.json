@@ -1,0 +1,37 @@
+{
+  "version": "0.3.0-custom-players-v1",
+  "seed": 380,
+  "player_count": 85,
+  "boss_count": 14,
+  "loot_count": 118,
+  "item_level_range": [
+    200,
+    232
+  ],
+  "item_level_model": "one character item level shared by all specs; spec performance uses skill only",
+  "custom_players": [
+    "P081",
+    "P082",
+    "P083",
+    "P084",
+    "P085"
+  ],
+  "files": [
+    "Auction_Rules.csv",
+    "Boss_Events.csv",
+    "Bosses.csv",
+    "Chat_Templates.csv",
+    "Economy_Types.csv",
+    "Game_Config.csv",
+    "Loot_Pool.csv",
+    "Player_Specs.csv",
+    "Players_Hidden.csv",
+    "Players_Public.csv",
+    "Social_Traits.csv",
+    "Specs.csv"
+  ],
+  "sources": [
+    "https://www.wowhead.com/wotlk/cn/guide/raids/ulduar/loot",
+    "https://www.wowhead.com/wotlk/guide/raids/ulduar/overview"
+  ]
+}

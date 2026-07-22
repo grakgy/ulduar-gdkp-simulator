@@ -1,0 +1,11 @@
+﻿rule,logic,note
+eligible_check,只按物品eligible_tags与人物当前专精职业/角色匹配,MVP不读取人物各部位装备
+desire_score,"spend_willingness + category_preference_bonus + quality_bonus + random(-20,20)",低于55不参与竞价
+quality_bonus,"C=0,B=5,A=12,S=22,S+=32",毕业装党对S/S+额外+20
+category_preference_bonus,匹配偏好+18；不匹配-12；排骨党额外-30,武器饰品党只对对应类别积极
+max_bid,"min(wallet-reserve, reference_price*economy_multiplier*random(0.85,1.15))",无需装备升级计算
+one_bidder,起拍价成交,若最高价低于起拍价则视为无人要
+multi_bidder,"min(最高承受价, 次高承受价+500)",快速模拟真实抬价
+no_bid,起拍价减半一次；仍无人要则100G分解,分解收入进入金池
+after_sale,买家wallet扣款，成交价进入pot,MVP不提升战斗属性
+final_split,pot/有分金资格人数,主动退团者取消分金；其他人保留
