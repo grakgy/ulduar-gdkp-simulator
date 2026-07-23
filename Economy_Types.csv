@@ -1,4 +1,4 @@
-﻿type,wallet_min,wallet_max,price_multiplier,bargain_factor,base_spend_willingness,preference,description
+type,wallet_min,wallet_max,price_multiplier,bargain_factor,base_spend_willingness,preference,description
 大老板,60000,180000,1.75,0.85,75,全部,可能战力高也可能菜；对高档装备出价激进
 小老板,20000,80000,1.2,0.75,62,主专精|饰品|武器,有明显提升才买
 实力消费,15000,70000,1.1,0.7,68,饰品|武器|套装,战斗与消费兼顾
@@ -7,3 +7,4 @@
 捡漏型,3000,30000,0.62,0.45,45,低价,低于参考价才参与
 排骨党,0,8000,0.12,0.15,12,几乎不买,主要目标是分金
 口嗨消费,1000,25000,0.4,0.35,30,随机,报名可能说有消费，实际出价保守
+简陋型,5000,30000,0.75,0.5,35,低价|小提升,预算普通，主要看底价与实用小提升，不主动抬高价格

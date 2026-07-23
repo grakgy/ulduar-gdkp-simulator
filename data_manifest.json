@@ -1,7 +1,8 @@
 {
-  "version": "0.3.0-custom-players-v1",
+  "version": "0.4.0-dynamic-pool",
   "seed": 380,
-  "player_count": 85,
+  "player_count": 101,
+  "active_pool_size": 40,
   "boss_count": 14,
   "loot_count": 118,
   "item_level_range": [
@@ -14,7 +15,23 @@
     "P082",
     "P083",
     "P084",
-    "P085"
+    "P085",
+    "P086",
+    "P087",
+    "P088",
+    "P089",
+    "P090",
+    "P091",
+    "P092",
+    "P093",
+    "P094",
+    "P095",
+    "P096",
+    "P097",
+    "P098",
+    "P099",
+    "P100",
+    "P101"
   ],
   "files": [
     "Auction_Rules.csv",

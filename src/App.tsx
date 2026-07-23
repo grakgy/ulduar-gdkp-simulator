@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { bosses, playersPublic, publicById, type Boss, type PublicPlayer } from './data'
+import { bosses, chatTemplates, playersForSeed, publicById, type Boss, type PublicPlayer } from './data'
 import { createMember, currentSpec, dynamicItemLevel, itemReferencePrice, itemStartPrice, publicSpecs, rngFor, roleCounts, runAuction, shuffled, simulateCombat, type AuctionRecord, type CombatMeter, type CombatResult, type TeamMember } from './engine'
+import recruitBackgroundUrl from '../photo/background01.jpg'
+
+const bossBackgroundModules = import.meta.glob('../photo/boss/*.jpg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
 
 type Phase = 'intro' | 'recruit' | 'prep' | 'combat' | 'auction' | 'result'
 type EndReason = '全通MVP' | '三次失败' | '成员退团散团' | ''
@@ -24,7 +27,7 @@ interface GameState {
   endReason: EndReason
 }
 
-const STORAGE_KEY = 'ulduar-gdkp-full-v9'
+const STORAGE_KEY = 'ulduar-gdkp-full-v11'
 const freshSeed = () => {
   const randomPart = typeof crypto !== 'undefined' && 'getRandomValues' in crypto ? crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 0xffffffff)
   return `${Date.now()}-${randomPart}`
@@ -68,6 +71,22 @@ export function publicWhisper(player: PublicPlayer, seed: string, round: number)
     }).filter(Boolean)
     return customOptions[Math.floor(rng() * customOptions.length)] ?? player.signup_spec
   }
+  const progress = believableProgress(player, itemLevel)
+  const economy = believableEconomy(player, itemLevel)
+  const styles = new Set(['极简', '低调'])
+  if (progress.includes('全通') || progress.includes('12/14')) styles.add('经验')
+  if (progress.includes('小号') || progress.includes('无成就')) styles.add('小号')
+  if (offspec.length && !pureDps) styles.add('多修')
+  if (/老板|消费|必拿|提升/.test(economy)) styles.add('消费')
+  if (/打工|毕业/.test(economy)) styles.add('打工')
+  if (/捡漏|便宜|排骨/.test(economy)) styles.add('排骨')
+  const templateOptions = chatTemplates.filter((entry) => entry.scene === '报名' && styles.has(entry.style_or_trait)).map((entry) => entry.template
+    .replaceAll('{spec}', pureDps ? '' : player.signup_spec)
+    .replaceAll('{offspec}', offspec[0] ?? '')
+    .replace(/\s+/g, ' ')
+    .trim())
+    .filter((line) => line && !line.includes('{}') && !/大号|成就在大号/.test(line))
+  if (templateOptions.length && rng() < .72) return templateOptions[Math.floor(rng() * templateOptions.length)]
   if (itemLevel >= 230) {
     const options = pureDps ? ['全通熟练工', '基本毕业，不消费', '来打工'] : [`${player.signup_spec} 全通熟练`, `${player.signup_spec} 基本毕业`, `${player.signup_spec} 来打工`]
     return options[Math.floor(rng() * options.length)]
@@ -93,6 +112,14 @@ function classStyle(className: string) {
   return { '--class-color': classColors[className] ?? '#9a9a92' } as React.CSSProperties
 }
 
+function sceneStyle(imageUrl: string) {
+  return { '--scene-image': `url("${imageUrl}")` } as React.CSSProperties
+}
+
+function bossSceneStyle(boss: Boss) {
+  return sceneStyle(bossBackgroundModules[`../photo/boss/${boss.boss_id}.jpg`])
+}
+
 function publicIntro(player: PublicPlayer, itemLevel = Number(player.signup_item_level)) {
   return `${player.name}｜${player.class}｜主修 ${player.signup_spec}（${player.signup_role}）｜装等 ${itemLevel}｜公开副修 ${player.claimed_offspec || '无'}｜${believableProgress(player, itemLevel)}｜${believableEconomy(player, itemLevel)}`
 }
@@ -113,15 +140,20 @@ function App() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '') as GameState } catch { return initialState() }
   })
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(game)) }, [game])
+  const playerPool = useMemo(() => playersForSeed(game.seed), [game.seed])
   const candidates = useMemo(() => {
     const selected = new Set(game.team.map((member) => member.id))
-    const available = playersPublic.filter((player) => !selected.has(player.player_id))
+    const available = playerPool.filter((player) => !selected.has(player.player_id))
     const roundSeed = `${game.seed}|round:${game.recruitRound}|team:${game.team.map((member) => member.id).join(',')}`
     return shuffled(available, roundSeed).slice(0, 5)
-  }, [game.seed, game.recruitRound, game.team])
+  }, [game.seed, game.recruitRound, game.team, playerPool])
   const boss = bosses[game.bossIndex]
 
   const start = () => setGame({ ...initialState(), phase: 'recruit' })
+  const restart = () => {
+    if (game.phase !== 'intro' && !window.confirm('现在重开会清空本局阵容、进度和金池，确定重新选人吗？')) return
+    setGame({ ...initialState(), phase: 'recruit' })
+  }
   const recruit = (player: PublicPlayer) => setGame((prev) => {
     const team = [...prev.team, createMember(player.player_id, prev.seed)]
     const nextRound = prev.recruitRound + 1
@@ -162,7 +194,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Header game={game} />
+      <Header game={game} onRestart={restart} />
       <main>
         {game.phase === 'auction' && <MoraleHistory entries={game.moraleLog ?? []} limit={6} />}
         {game.phase === 'intro' && <Intro onStart={start} />}
@@ -177,9 +209,9 @@ function App() {
   )
 }
 
-function Header({ game }: { game: GameState }) {
+function Header({ game, onRestart }: { game: GameState; onRestart: () => void }) {
   const stage = game.phase === 'intro' ? '开团公告' : game.phase === 'recruit' ? `招募 ${game.recruitRound + 1}/10` : game.phase === 'prep' ? '战前准备' : game.phase === 'combat' ? '战斗记录' : game.phase === 'auction' ? '掉落拍卖' : '最终结算'
-  return <header className="topbar"><div className="brand"><span className="brand-mark">U</span><div><b>奥杜尔十人金团</b><small>MVP SIMULATOR</small></div></div><div className="stage-pill"><span>{stage}</span><i>随机局</i></div>{game.phase !== 'intro' && <div className="header-stats"><span>士气 <b>{game.morale}</b></span><span>金池 <b>{gold(game.pot)}</b></span></div>}</header>
+  return <header className="topbar"><div className="brand"><span className="brand-mark">U</span><div><b>奥杜尔十人金团</b><small>MVP SIMULATOR</small></div></div><div className="stage-pill"><span>{stage}</span><i>随机局</i></div><div className="header-actions">{game.phase !== 'intro' && <div className="header-stats"><span>士气 <b>{game.morale}</b></span><span>金池 <b>{gold(game.pot)}</b></span></div>}<button className="restart-run" onClick={onRestart}>{game.phase === 'intro' ? '直接开团' : '重开一把'} <span>↻</span></button></div></header>
 }
 
 function Intro({ onStart }: { onStart: () => void }) {
@@ -187,7 +219,7 @@ function Intro({ onStart }: { onStart: () => void }) {
 }
 
 function Recruitment({ round, candidates, team, seed, onRecruit }: { round: number; candidates: PublicPlayer[]; team: TeamMember[]; seed: string; onRecruit: (p: PublicPlayer) => void }) {
-  return <section className="page recruit-page"><div className="page-heading"><div><div className="eyebrow">RECRUITMENT · ROUND {round + 1}</div><h2>本轮只收一个</h2><p>未选中的四人回到候选池，后续轮次仍可能再次出现。</p></div><div className="round-dots" aria-label={`第${round + 1}轮`}>{Array.from({ length: 10 }, (_, i) => <i key={i} className={i < round ? 'done' : i === round ? 'active' : ''}>{i + 1}</i>)}</div></div><div className="recruit-layout"><div className="candidate-grid">{candidates.map((p) => <CandidateCard key={p.player_id} player={p} seed={seed} round={round} onChoose={() => onRecruit(p)} />)}</div><aside className="roster-panel"><div className="panel-title"><span>当前团队 · 公开信息</span><b>{team.length}<small>/10</small></b></div>{team.length === 0 ? <div className="empty-roster">名单还是空的。<br/>第一手最见团长功力。</div> : <div className="compact-roster">{team.map((m, i) => { const p = publicById.get(m.id)!; return <div className="compact-member person-hover" data-intro={publicIntro(p, m.itemLevel)} style={classStyle(p.class)} key={m.id}><span className="roster-no">{String(i + 1).padStart(2, '0')}</span><i style={{ background: classColors[p.class] }} /><span className="compact-identity"><b>{p.name}</b><small><RoleMark role={p.signup_role}/> 主修 {p.signup_spec} · {m.itemLevel}</small></span><span className="compact-public"><small>副修 {p.claimed_offspec || '无'}</small><em>{believableEconomy(p, m.itemLevel)}</em></span></div> })}</div>}<div className="public-note">悬停人物可查看完整公开介绍</div></aside></div></section>
+  return <section className="page recruit-page scene-page recruit-scene" style={sceneStyle(recruitBackgroundUrl)}><div className="page-heading"><div><div className="eyebrow">RECRUITMENT · ROUND {round + 1}</div><h2>本轮只收一个</h2><p>未选中的四人回到候选池，后续轮次仍可能再次出现。</p></div><div className="round-dots" aria-label={`第${round + 1}轮`}>{Array.from({ length: 10 }, (_, i) => <i key={i} className={i < round ? 'done' : i === round ? 'active' : ''}>{i + 1}</i>)}</div></div><div className="recruit-layout"><div className="candidate-grid">{candidates.map((p) => <CandidateCard key={p.player_id} player={p} seed={seed} round={round} onChoose={() => onRecruit(p)} />)}</div><aside className="roster-panel"><div className="panel-title"><span>当前团队 · 公开信息</span><b>{team.length}<small>/10</small></b></div>{team.length === 0 ? <div className="empty-roster">名单还是空的。<br/>第一手最见团长功力。</div> : <div className="compact-roster">{team.map((m, i) => { const p = publicById.get(m.id)!; return <div className="compact-member person-hover" data-intro={publicIntro(p, m.itemLevel)} style={classStyle(p.class)} key={m.id}><span className="roster-no">{String(i + 1).padStart(2, '0')}</span><i style={{ background: classColors[p.class] }} /><span className="compact-identity"><b>{p.name}</b><small><RoleMark role={p.signup_role}/> 主修 {p.signup_spec} · {m.itemLevel}</small></span><span className="compact-public"><small>副修 {p.claimed_offspec || '无'}</small><em>{believableEconomy(p, m.itemLevel)}</em></span></div> })}</div>}<div className="public-note">悬停人物可查看完整公开介绍</div></aside></div></section>
 }
 
 function CandidateCard({ player: p, seed, round, onChoose }: { player: PublicPlayer; seed: string; round: number; onChoose: () => void }) {
@@ -199,7 +231,7 @@ function CandidateCard({ player: p, seed, round, onChoose }: { player: PublicPla
 function Preparation({ boss, team, morale, moraleLog, attempt, lastCombat, onSetSpec, onAttempt }: { boss: Boss; team: TeamMember[]; morale: number; moraleLog: MoraleEntry[]; attempt: number; lastCombat?: CombatResult; onSetSpec: (id: string, spec: string) => void; onAttempt: () => void }) {
   const counts = roleCounts(team)
   const modeLabel = boss.mode === '特殊' ? 'SPECIAL' : boss.hard_mode === '是' ? 'HARD MODE' : 'NORMAL'
-  return <section className="page"><div className="boss-banner"><div><div className="eyebrow">BOSS {boss.order} / {bosses.length} · {modeLabel}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · {boss.design_note}</p></div><div className="attempt-badge"><span>下一次尝试</span><b>0{attempt}</b><small>/ 03</small></div></div>{lastCombat && !lastCombat.killed && <WipeReport result={lastCombat} morale={morale} />}<div className="prep-grid"><div className="team-table"><div className="table-head"><span>团员 / 公开报名信息</span><span>装等</span><span>本 Boss 出战专精</span><span>职责</span></div>{team.map((m) => { const p = publicById.get(m.id)!; const specs = publicSpecs(m.id); const spec = currentSpec(m); return <div className="team-row person-hover" data-intro={publicIntro(p, m.itemLevel)} style={classStyle(p.class)} key={m.id}><div className="member-name"><i style={{ background: classColors[p.class] }} /><span><b>{p.name}</b><small>{p.class} · 主修 {p.signup_spec} · 副修 {p.claimed_offspec || '无'} · {believableEconomy(p, m.itemLevel)}</small></span></div><strong>{m.itemLevel}</strong><select value={m.currentSpec} onChange={(e) => onSetSpec(m.id, e.target.value)} aria-label={`${p.name}的出战专精`}>{specs.map((s) => <option key={s.spec}>{s.spec}</option>)}</select><span className={`role role-${spec.role}`}><RoleMark role={spec.role}/>{spec.role}</span></div>})}</div><aside className="strategy-panel"><div className="panel-title"><span>阵容概览</span><b>{morale}<small>士气</small></b></div><div className="role-counts"><div><span><RoleMark role="坦克"/>坦克</span><b>{counts.坦克}</b></div><div><span><RoleMark role="治疗"/>治疗</span><b>{counts.治疗}</b></div><div><span><RoleMark role="近战DPS"/>近战</span><b>{counts.近战DPS}</b></div><div><span><RoleMark role="远程DPS"/>远程</span><b>{counts.远程DPS}</b></div></div><MoraleHistory entries={moraleLog} limit={4} compact/><div className="checks"><b>关键检定</b>{boss.key_checks.split('|').map((c) => <span key={c}>◆ {c}</span>)}</div><p className="warning-copy">下拉框只包含报名时公开声明的专精。副修真实水平仍然隐藏，会在战斗记录和统计里自然体现。</p><button className="primary battle-button" onClick={onAttempt}>开始第 {attempt} 次尝试 <span>→</span></button></aside></div></section>
+  return <section className="page scene-page boss-scene" style={bossSceneStyle(boss)}><div className="boss-banner"><div><div className="eyebrow">BOSS {boss.order} / {bosses.length} · {modeLabel}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · {boss.design_note}</p></div><div className="attempt-badge"><span>下一次尝试</span><b>0{attempt}</b><small>/ 03</small></div></div>{lastCombat && !lastCombat.killed && <WipeReport result={lastCombat} morale={morale} />}<div className="prep-grid"><div className="team-table"><div className="table-head"><span>团员 / 公开报名信息</span><span>装等</span><span>本 Boss 出战专精</span><span>职责</span></div>{team.map((m) => { const p = publicById.get(m.id)!; const specs = publicSpecs(m.id); const spec = currentSpec(m); return <div className="team-row person-hover" data-intro={publicIntro(p, m.itemLevel)} style={classStyle(p.class)} key={m.id}><div className="member-name"><i style={{ background: classColors[p.class] }} /><span><b>{p.name}</b><small>{p.class} · 主修 {p.signup_spec} · 副修 {p.claimed_offspec || '无'} · {believableEconomy(p, m.itemLevel)}</small></span></div><strong>{m.itemLevel}</strong><select value={m.currentSpec} onChange={(e) => onSetSpec(m.id, e.target.value)} aria-label={`${p.name}的出战专精`}>{specs.map((s) => <option key={s.spec}>{s.spec}</option>)}</select><span className={`role role-${spec.role}`}><RoleMark role={spec.role}/>{spec.role}</span></div>})}</div><aside className="strategy-panel"><div className="panel-title"><span>阵容概览</span><b>{morale}<small>士气</small></b></div><div className="role-counts"><div><span><RoleMark role="坦克"/>坦克</span><b>{counts.坦克}</b></div><div><span><RoleMark role="治疗"/>治疗</span><b>{counts.治疗}</b></div><div><span><RoleMark role="近战DPS"/>近战</span><b>{counts.近战DPS}</b></div><div><span><RoleMark role="远程DPS"/>远程</span><b>{counts.远程DPS}</b></div></div><MoraleHistory entries={moraleLog} limit={4} compact/><div className="checks"><b>关键检定</b>{boss.key_checks.split('|').map((c) => <span key={c}>◆ {c}</span>)}</div><p className="warning-copy">下拉框只包含报名时公开声明的专精。副修真实水平仍然隐藏，会在战斗记录和统计里自然体现。</p><button className="primary battle-button" onClick={onAttempt}>开始第 {attempt} 次尝试 <span>→</span></button></aside></div></section>
 }
 
 function CombatPlayback({ boss, result, onComplete }: { boss: Boss; result: CombatResult; onComplete: () => void }) {
@@ -214,12 +246,27 @@ function CombatPlayback({ boss, result, onComplete }: { boss: Boss; result: Comb
   const targetHp = result.killed ? 0 : result.remainingHp
   const bossHp = Math.round(100 - (100 - targetHp) * Math.min(step / totalSteps, 1))
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
-  return <section className="page combat-page"><div className="combat-heading"><div><div className="eyebrow">LIVE COMBAT LOG · ATTEMPT {result.attempt}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · 重要事件实时记录</p></div><div className="boss-health"><span>Boss 血量</span><b>{bossHp}%</b><i><em style={{ width: `${bossHp}%` }} /></i></div></div><div className="combat-console"><div className="console-top"><span>战斗记录</span><small>{finished ? `战斗时长 ${formatTime(result.duration)}` : '战斗进行中…'}</small></div><div className="log-line opening visible"><time>0:00</time><i>◆</i><div><b>战斗开始</b><p>团长喊了句“都懂吧”就开怪了，坦克接怪，治疗开始观察谁最会掉血。</p></div></div>{result.events.map((event, index) => { const visible = step > index; const time = result.duration * (event.timeRatio ?? (index + 1) / (result.events.length + 1)); return <div key={`${event.name}-${index}`} className={`log-line ${event.status} ${visible ? 'visible' : ''}`}><time>{formatTime(time)}</time><i>{event.status === '成功' ? '✓' : event.status === '险情' ? '!' : '×'}</i><div><b>{event.name}</b><p>{event.detail}{event.responsible ? ` · 责任人：${event.responsible}` : ''}{event.recovery ? <><br/><span className="event-recovery">补救：{event.recovery}</span></> : null}</p></div><em>{event.status}</em></div> })}{finished && <div className={`log-line finale visible ${result.killed ? '成功' : '失败'}`}><time>{formatTime(result.duration)}</time><i>{result.killed ? '✓' : '×'}</i><div><b>{result.killed ? `${boss.boss_name} 被击杀，老板请躺好` : `全团整齐躺平，Boss 还剩 ${result.remainingHp}%`}</b><p>{result.reason}</p></div><em>{result.killed ? '击杀' : '灭团'}</em></div>}</div>{finished ? <><FightStatsStrip result={result}/><CombatMeters meters={result.meters}/><div className="combat-actions"><span>{result.killed ? '战斗统计已记账，接下来看看谁愿意为紫色像素上头。' : '锅已经写进战斗记录，回去还能重新排职责。'}</span><button className="primary large" onClick={onComplete}>{result.killed ? '进入掉落拍卖' : '结算本次灭团'} <b>→</b></button></div></> : <div className="combat-progress"><span style={{ width: `${step / totalSteps * 100}%` }}/><button onClick={() => setStep(totalSteps)}>展开完整记录</button></div>}</section>
+  const copyRng = rngFor(result.bossId, result.attempt, result.duration, 'combat-copy')
+  const openings = ['团长倒数到二就开了怪，坦克接住仇恨，治疗开始寻找今晚第一个血压来源。', '标记刚摆完Boss就被拉了过来，全团一边找位置一边假装早有准备。', '一句“这把认真点”之后正式开怪，所有人的保命技能突然显得格外醒目。', '坦克冲锋，治疗喝水被迫取消，输出们则一致表示自己绝对没提前动手。', '倒数结束，全团散开站位；至少从远处看，这次很像一个熟练团。', '团长确认了一遍打断顺序，随后Boss用第一轮技能检查大家到底听没听。']
+  const killTitles = [`${boss.boss_name} 倒下，拍卖师开始清嗓子`, `${boss.boss_name} 被击杀，全团瞬间恢复打字能力`, `${boss.boss_name} 交货，刚才装死的人开始研究掉落`, `${boss.boss_name} 击杀，修理费暂时停止上涨`, `${boss.boss_name} 含泪倒地，团队频道开始刷“出货”`]
+  const recoveredKillTitles = [`战复接上，${boss.boss_name} 最终还是倒了`, `带着减员收尾，${boss.boss_name} 交出掉落`, `${boss.boss_name} 被险险击杀，战复没有白交`]
+  const fatalWipeTitles = [`关键机制崩盘，Boss 还剩 ${result.remainingHp}%`, `连锁事故压垮团队，Boss 剩余 ${result.remainingHp}%`, `战斗当场失控，Boss 带着 ${result.remainingHp}% 血量继续值班`]
+  const attritionWipeTitles = [`减员拖垮后半程，Boss 还剩 ${result.remainingHp}%`, `剩余成员没能收尾，Boss 剩余 ${result.remainingHp}%`, `战复与减员都没能挽回这一把，Boss 还剩 ${result.remainingHp}%`]
+  const enrageWipeTitles = [`前面险情已处理，最终仍倒在狂暴前`, `战斗拖进极限阶段，Boss 还剩 ${result.remainingHp}%`, `最后阶段资源见底，Boss 剩余 ${result.remainingHp}%`]
+  const opening = openings[Math.floor(copyRng() * openings.length)]
+  const hasFatalEvent = result.events.some((event) => event.status === '失败')
+  const deaths = result.deaths ?? []
+  const wipeTitles = hasFatalEvent ? fatalWipeTitles : (result.casualties ?? 0) > 0 || deaths.length ? attritionWipeTitles : enrageWipeTitles
+  const finaleTitles = result.killed ? (deaths.length ? recoveredKillTitles : killTitles) : wipeTitles
+  const finale = finaleTitles[Math.floor(copyRng() * finaleTitles.length)]
+  return <section className="page combat-page scene-page boss-scene" style={bossSceneStyle(boss)}><div className="combat-heading"><div><div className="eyebrow">LIVE COMBAT LOG · ATTEMPT {result.attempt}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · 重要事件实时记录</p></div><div className="boss-health"><span>Boss 血量</span><b>{bossHp}%</b><i><em style={{ width: `${bossHp}%` }} /></i></div></div><div className="combat-console"><div className="console-top"><span>战斗记录</span><small>{finished ? `战斗时长 ${formatTime(result.duration)}` : '战斗进行中…'}</small></div><div className="log-line opening visible"><time>0:00</time><i>◆</i><div><b>战斗开始</b><p>{opening}</p></div></div>{result.events.map((event, index) => { const visible = step > index; const time = result.duration * (event.timeRatio ?? (index + 1) / (result.events.length + 1)); return <div key={`${event.name}-${index}`} className={`log-line ${event.status} ${visible ? 'visible' : ''}`}><time>{formatTime(time)}</time><i>{event.status === '成功' ? '✓' : event.status === '险情' ? '!' : '×'}</i><div><b>{event.name}</b><p>{event.detail}{event.responsible ? ` · 责任人：${event.responsible}` : ''}{event.recovery ? <><br/><span className="event-recovery">补救：{event.recovery}</span></> : null}</p></div><em>{event.status}</em></div> })}{finished && <div className={`log-line finale visible ${result.killed ? '成功' : '失败'}`}><time>{formatTime(result.duration)}</time><i>{result.killed ? '✓' : '×'}</i><div><b>{finale}</b><p>{result.reason}</p></div><em>{result.killed ? '击杀' : '灭团'}</em></div>}</div>{finished ? <><FightStatsStrip result={result}/><CombatMeters meters={result.meters}/><div className="combat-actions"><span>{result.killed ? '战斗统计已记账，接下来看看谁愿意为紫色像素上头。' : '锅已经写进战斗记录，回去还能重新排职责。'}</span><button className="primary large" onClick={onComplete}>{result.killed ? '进入掉落拍卖' : '结算本次灭团'} <b>→</b></button></div></> : <div className="combat-progress"><span style={{ width: `${step / totalSteps * 100}%` }}/><button onClick={() => setStep(totalSteps)}>展开完整记录</button></div>}</section>
 }
 
 function FightStatsStrip({ result }: { result: CombatResult }) {
   const minutes = `${Math.floor(result.duration / 60)}分${result.duration % 60}秒`
-  return <div className="fight-stats-strip"><div><small>团队 DPS</small><b>{number(result.teamDps)}</b></div><div><small>团队 HPS</small><b>{number(result.teamHps)}</b></div><div><small>战斗时长</small><b>{minutes}</b></div><div><small>战斗结果</small><b className={result.killed ? 'stat-kill' : 'stat-wipe'}>{result.killed ? '击杀' : `剩余 ${result.remainingHp}%`}</b></div></div>
+  const deaths = result.deaths?.length ?? 0
+  const battleReses = result.battleReses ?? 0
+  return <div className="fight-stats-strip"><div><small>团队 DPS</small><b>{number(result.teamDps)}</b></div><div><small>团队 HPS</small><b>{number(result.teamHps)}</b></div><div><small>战斗时长</small><b>{minutes}</b></div><div><small>倒地 / 战复</small><b className={deaths ? 'stat-wipe' : ''}>{deaths} / {battleReses}</b></div><div><small>战斗结果</small><b className={result.killed ? 'stat-kill' : 'stat-wipe'}>{result.killed ? '击杀' : `剩余 ${result.remainingHp}%`}</b></div></div>
 }
 
 function CombatMeters({ meters, compact = false }: { meters: CombatMeter[]; compact?: boolean }) {
@@ -231,7 +278,9 @@ function CombatMeters({ meters, compact = false }: { meters: CombatMeter[]; comp
     const player = publicById.get(meter.playerId)!
     const value = healingRow ? meter.hps : meter.dps
     const max = healingRow ? maxHps : maxDps
-    return <div className="meter-row person-hover" data-intro={publicIntro(player, meter.itemLevel)} style={classStyle(player.class)} key={`${healingRow ? 'h' : 'd'}-${meter.playerId}`}><em>{index + 1}</em><RoleMark role={meter.role}/><span><b>{meter.name}</b><small>{meter.spec}</small><u className={healingRow ? 'heal' : ''} style={{ width: `${value / max * 100}%` }}/></span><strong>{number(value)}</strong></div>
+    const status = meter.died ? (meter.battleResurrected ? ' · 战复' : ' · 阵亡') : ''
+    const active = meter.died && meter.activeRatio ? ` · 出勤${Math.round(meter.activeRatio * 100)}%` : ''
+    return <div className={`meter-row person-hover ${meter.died ? 'meter-dead' : ''}`} data-intro={publicIntro(player, meter.itemLevel)} style={classStyle(player.class)} key={`${healingRow ? 'h' : 'd'}-${meter.playerId}`}><em>{index + 1}</em><RoleMark role={meter.role}/><span><b>{meter.name}</b><small>{meter.spec}<i className="meter-status">{status}{active}</i></small><u className={healingRow ? 'heal' : ''} style={{ width: `${value / max * 100}%` }}/></span><strong>{number(value)}</strong></div>
   }
   return <div className={`meters-grid ${compact ? 'compact' : ''}`}><div className="meter-panel"><div className="meter-title"><span>DAMAGE</span><b>伤害统计</b></div>{damage.map((meter, index) => row(meter, index))}</div><div className="meter-panel"><div className="meter-title"><span>HEALING</span><b>治疗统计</b></div>{healing.length ? healing.map((meter, index) => row(meter, index, true)) : <p className="no-meter">本次没有治疗专精出战</p>}</div></div>
 }
@@ -242,7 +291,7 @@ function WipeReport({ result, morale }: { result: CombatResult; morale: number }
 
 function Auction({ boss, records, result, pot, morale, onNext, isLast }: { boss: Boss; records: AuctionRecord[]; result: CombatResult; pot: number; morale: number; onNext: () => void; isLast: boolean }) {
   const lootLabel = boss.mode === '特殊' ? '2 件专属掉落' : boss.hard_mode === '是' ? '1 件普通 · 1 件困难' : '2 件普通装备'
-  return <section className="page"><div className="kill-banner"><span>✓ BOSS DEFEATED</span><h2>{boss.boss_name} 已击杀</h2><p>第 {result.attempt} 次尝试 · 士气 {morale} · 金池 {gold(pot)}</p></div><FightStatsStrip result={result}/><div className="loot-heading"><div><div className="eyebrow">LOOT AUCTION</div><h3>掉落拍卖</h3></div><span>{lootLabel}</span></div><div className="loot-grid">{records.map((record) => <article className={`loot-card grade-${record.item.grade.replace('+', 'plus')}`} key={record.item.loot_id}><div className="loot-grade">{record.item.grade}</div><div className="loot-info"><small>{record.item.drop_group} · {record.item.slot}</small><h4>{record.item.item_name}</h4><p>{record.item.eligible_tags.replaceAll('|', ' / ')}</p><div><span>起拍 {gold(itemStartPrice(record.item))}</span><span>参考 {gold(itemReferencePrice(record.item))}</span></div></div><div className="bid-log">{record.log.map((line, i) => <p key={i}>{line}</p>)}</div><div className={`sale-result ${record.salvaged ? 'unsold' : ''}`}><span>{record.salvaged ? '流拍分解' : record.buyerName}</span><b>{gold(record.price)}</b></div></article>)}</div><div className="auction-footer"><div><small>当前金池</small><b>{gold(pot)}</b></div><button className="primary large" onClick={onNext}>{isLast ? '查看最终结算' : '前往下一个 Boss'} <span>→</span></button></div></section>
+  return <section className="page scene-page boss-scene" style={bossSceneStyle(boss)}><div className="kill-banner"><span>✓ BOSS DEFEATED</span><h2>{boss.boss_name} 已击杀</h2><p>第 {result.attempt} 次尝试 · 士气 {morale} · 金池 {gold(pot)}</p></div><FightStatsStrip result={result}/><div className="loot-heading"><div><div className="eyebrow">LOOT AUCTION</div><h3>掉落拍卖</h3></div><span>{lootLabel}</span></div><div className="loot-grid">{records.map((record) => <article className={`loot-card grade-${record.item.grade.replace('+', 'plus')}`} key={record.item.loot_id}><div className="loot-grade">{record.item.grade}</div><div className="loot-info"><small>{record.item.drop_group} · {record.item.slot}</small><h4>{record.item.item_name}</h4><p>{record.item.eligible_tags.replaceAll('|', ' / ')}</p><div><span>起拍 {gold(itemStartPrice(record.item))}</span><span>参考 {gold(itemReferencePrice(record.item))}</span></div></div><div className="bid-log">{record.log.map((line, i) => <p key={i}>{line}</p>)}</div><div className={`sale-result ${record.salvaged ? 'unsold' : ''}`}><span>{record.salvaged ? '流拍分解' : record.buyerName}</span><b>{gold(record.price)}</b></div></article>)}</div><div className="auction-footer"><div><small>当前金池</small><b>{gold(pot)}</b></div><button className="primary large" onClick={onNext}>{isLast ? '查看最终结算' : '前往下一个 Boss'} <span>→</span></button></div></section>
 }
 
 function Results({ game, onNew }: { game: GameState; onReplay?: () => void; onNew: () => void }) {

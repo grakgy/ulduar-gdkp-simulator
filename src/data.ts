@@ -4,7 +4,7 @@ import playerSpecsRaw from '../Player_Specs.csv?raw'
 import bossesRaw from '../Bosses.csv?raw'
 import eventsRaw from '../Boss_Events.csv?raw'
 import lootRaw from '../Loot_Pool.csv?raw'
-import playerPoolRaw from '../Player_Pool.csv?raw'
+import chatTemplatesRaw from '../Chat_Templates.csv?raw'
 
 export type Role = '坦克' | '治疗' | '近战DPS' | '远程DPS'
 
@@ -44,7 +44,19 @@ export interface HiddenPlayer {
   bargain_factor: string
   purchase_preference: string
   claim_honesty: string
-  notes: string
+  source_type: '随机生成' | '玩家自建'
+  personality_type: string
+  strength_tags: string
+  weakness_tags: string
+  special_rule: string
+  leave_policy: string
+  description: string
+}
+
+export interface ChatTemplate {
+  scene: '报名' | '灭团' | '退团' | '拍卖'
+  style_or_trait: string
+  template: string
 }
 
 export interface PlayerSpec {
@@ -125,17 +137,15 @@ function parseCsv<T>(text: string): T[] {
   return body.map((values) => Object.fromEntries(headers.map((h, i) => [h.trim(), values[i]?.trim() ?? ''])) as T)
 }
 
-const fullPlayersPublic = parseCsv<PublicPlayer>(playersPublicRaw)
-const selectedPlayerIds = new Set(parseCsv<{ player_id: string }>(playerPoolRaw).map((player) => player.player_id))
-
-export const playersPublic = fullPlayersPublic.filter((player) => selectedPlayerIds.has(player.player_id))
+export const fullPlayersPublic = parseCsv<PublicPlayer>(playersPublicRaw)
 export const playersHidden = parseCsv<HiddenPlayer>(playersHiddenRaw)
 export const playerSpecs = parseCsv<PlayerSpec>(playerSpecsRaw)
 export const bosses = parseCsv<Boss>(bossesRaw).sort((a, b) => Number(a.order) - Number(b.order))
 export const bossEvents = parseCsv<BossEvent>(eventsRaw)
 export const lootPool = parseCsv<LootItem>(lootRaw)
+export const chatTemplates = parseCsv<ChatTemplate>(chatTemplatesRaw)
 
-export const publicById = new Map(playersPublic.map((p) => [p.player_id, p]))
+export const publicById = new Map(fullPlayersPublic.map((p) => [p.player_id, p]))
 export const hiddenById = new Map(playersHidden.map((p) => [p.player_id, p]))
 export const specsByPlayer = new Map<string, PlayerSpec[]>()
 for (const spec of playerSpecs) {
@@ -143,3 +153,23 @@ for (const spec of playerSpecs) {
   list.push(spec)
   specsByPlayer.set(spec.player_id, list)
 }
+
+function poolHash(input: string): number {
+  let hash = 2166136261
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+export function playersForSeed(seed: string, poolSize = 40): PublicPlayer[] {
+  const custom = fullPlayersPublic.filter((player) => hiddenById.get(player.player_id)?.source_type === '玩家自建')
+  const random = fullPlayersPublic
+    .filter((player) => hiddenById.get(player.player_id)?.source_type === '随机生成')
+    .sort((left, right) => poolHash(`${seed}|pool|${left.player_id}`) - poolHash(`${seed}|pool|${right.player_id}`))
+  return [...custom, ...random.slice(0, Math.max(0, poolSize - custom.length))]
+}
+
+// 保留旧导出供脚本与外部调用使用；实际游戏会按本局 seed 生成自己的 40 人池。
+export const playersPublic = playersForSeed('380')

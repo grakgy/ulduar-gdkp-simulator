@@ -1,4 +1,4 @@
-import { bossEvents, hiddenById, lootPool, playerSpecs, publicById, specsByPlayer, type Boss, type LootItem, type PlayerSpec, type Role } from './data'
+import { bossEvents, chatTemplates, hiddenById, lootPool, playerSpecs, publicById, specsByPlayer, type Boss, type HiddenPlayer, type LootItem, type PlayerSpec, type Role } from './data'
 
 export interface TeamMember {
   id: string
@@ -32,6 +32,19 @@ export interface CombatMeter {
   hps: number
   damage: number
   healing: number
+  died?: boolean
+  battleResurrected?: boolean
+  activeRatio?: number
+}
+
+export interface CombatDeath {
+  playerId: string
+  name: string
+  role: Role
+  eventName: string
+  timeRatio: number
+  battleResurrected: boolean
+  resurrectedBy?: string
 }
 
 export interface CombatResult {
@@ -52,6 +65,9 @@ export interface CombatResult {
   teamDps: number
   teamHps: number
   meters: CombatMeter[]
+  deaths: CombatDeath[]
+  casualties: number
+  battleReses: number
 }
 
 export interface Bid {
@@ -136,6 +152,25 @@ function n(value: string | undefined) { return Number(value ?? 0) }
 function avg(values: number[]) { return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0 }
 function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)) }
 
+export function personalLearningGain(hidden: HiddenPlayer, spec: PlayerSpec, attempt: number): number {
+  if (attempt <= 1) return 0
+  const learningRate = clamp(n(hidden.learning) / 100, 0, 1)
+  const unfamiliarity = clamp((100 - n(spec.boss_experience)) / 100, 0, 1)
+  const responsibilityBonus = [hidden.social_primary, hidden.social_secondary].includes('责任型') ? 1 : 0
+  const overconfidencePenalty = hidden.social_primary === '自信型' ? .75 : 0
+  const perWipeGain = 1.5 + learningRate * (2 + unfamiliarity * 4) + responsibilityBonus - overconfidencePenalty
+  return Math.max(0, perWipeGain * (attempt - 1))
+}
+
+function pickChatTemplate(scene: '灭团' | '退团', styles: string[], rng: () => number): string | undefined {
+  const matching = chatTemplates.filter((entry) => entry.scene === scene && styles.includes(entry.style_or_trait))
+  return matching.length ? matching[Math.floor(rng() * matching.length)].template : undefined
+}
+
+function isQuietPlayer(hidden: HiddenPlayer): boolean {
+  return [hidden.social_primary, hidden.social_secondary].some((trait) => trait === '沉默型' || trait === '不开麦')
+}
+
 interface EncounterProfile {
   melee: number
   ranged: number
@@ -194,10 +229,26 @@ function recoveryMember(eventName: string, targetId: string, team: TeamMember[],
 }
 
 function recoveryText(eventName: string, targetName: string, rng: () => number): string {
-  const positional = [`把${targetName}从危险区喊了出来，紧接着把血线抬稳。`, `及时让开安全区，把${targetName}从残血边缘捞了回来。`]
-  const interrupt = [`备用打断组及时补位，漏掉的读条没有形成连锁减员。`, `下一棒打断提前接手，${targetName}的血线也被稳住。`]
-  const tank = [`副坦临时接怪，主坦开减伤重新建立仇恨，外部减伤也及时跟上。`, `坦克开大技能硬吃后续伤害，血线刷满后重新换坦。`]
-  const add = [`远程立刻转火残血目标，近战交控制拖住小怪，赶在下一轮前清场。`, `团队暂停压本体，集火补掉漏怪后重新回到原节奏。`]
+  const positional = [
+    `提前让出安全位，把${targetName}从技能边缘接了回来。`, `把减伤和治疗一起压给${targetName}，硬是把红血条续上了。`,
+    `先一步标出落点，${targetName}擦着技能边缘逃了出来。`, `临时改站位给${targetName}腾路，险情没有继续传染。`,
+    `反应够快，把${targetName}从人群里带开，后续伤害也被吃稳。`, `一个救命技能落下去，${targetName}从黑白屏门口被拽了回来。`,
+  ]
+  const interrupt = [
+    `补上备用打断，漏掉的读条没有形成连锁减员。`, `提前接走下一棒打断，${targetName}也趁机把位置站回去。`,
+    `用控制顶掉空档，施法条刚冒头就被重新按住。`, `发现顺序乱了立刻补断，Boss这口法术只读了个标题。`,
+    `临时在团队频道打出新顺序，下一秒就把断档堵上。`, `把压箱底的沉默交了，救下这一轮也救下了团长的血压。`,
+  ]
+  const tank = [
+    `临时接怪并补上外部减伤，让坦克重新建立仇恨。`, `把救命技能塞给主坦，血线刷满后重新完成换坦。`,
+    `先嘲讽拖了两秒，等减伤转好才把Boss交回去。`, `卡着最后一口血补上保护，主坦没倒，治疗也终于敢喘气。`,
+    `把副目标拉离人群，原本要炸团的仇恨重新归位。`, `补位接住重击，换坦虽然难看，好歹没有变成跑尸教学。`,
+  ]
+  const add = [
+    `立刻转火残血目标，再用控制拖住漏怪，赶在下一轮前清场。`, `暂停压本体，带队补掉漏怪后重新回到原节奏。`,
+    `把漏掉的小怪标了骷髅，全团终于打在了同一个目标上。`, `交出群控拖住增援，给远程争出一轮完整转火时间。`,
+    `用爆发收掉最危险的那只，剩下的小怪没能滚起雪球。`, `把乱跑的增援拽回技能区，原本的事故现场勉强重新开工。`,
+  ]
   const choices = /打断|读条|施法/.test(eventName) ? interrupt : /坦|仇恨|重击/.test(eventName) ? tank : /小怪|构造体|卫士|触手|增援/.test(eventName) ? add : positional
   return choices[Math.floor(rng() * choices.length)]
 }
@@ -208,9 +259,25 @@ function personalizedEventDetail(playerId: string, eventName: string, status: '�
     if (status !== '成功' && roll < .08) return roll < .04 ? '汉祚将尽开怪后才发现箭没带够，输出栏当场进入默哀模式。' : '汉祚将尽掏错了武器，等换回来时机制已经骑到全团脸上。'
   }
   if (playerId === 'P087' && status !== '成功') return `愤怒月神提出了一个听起来很聪明的新点子，执行五秒后证明主要聪明在语气上。${fallback}`
+  if (playerId === 'P083' && status === '险情') return `芙兰秀秀第一拍慢了半秒，好在队友还有技能，事故被摁回了险情。${fallback}`
+  if (playerId === 'P083' && status === '失败') return `芙兰秀秀没接上这轮口令，防骑的硬度也没能替她处理机制。${fallback}`
   if (playerId === 'P091' && status !== '成功') return /移动|跑位|分散|传送|躲避|黑洞/.test(eventName) ? `姆巴妹的一键宏没有“边跑边长脑子”这个功能。${fallback}` : fallback
+  if (playerId === 'P097' && status !== '成功') return /移动|跑位|分散|传送|躲避|黑洞/.test(eventName) ? `佐贺偶像的宏负责输出，至于腿往哪走，宏表示不在服务范围内。${fallback}` : fallback
+  if (playerId === 'P095' && status !== '成功' && roll < .04) return `多多球刚吐槽完低级错误，自己脑子也闪退了两秒。${fallback}`
   if (playerId === 'P093' && status !== '成功' && /分组|传送|星星|报点|顺序/.test(eventName)) return `茗依处理本身没问题，但不开麦让临时报点慢了半拍。${fallback}`
   return fallback
+}
+
+function describesDeath(text: string): boolean {
+  return /死亡|被击杀|死人|倒坦|猝死|秒坦|报废|消耗战复/.test(text)
+}
+
+function isCatastrophicFailure(text: string): boolean {
+  return /直接灭团|多人|全灭|两组.*报废|火铺满|失控|连续漏|连锁|横穿全团|打穿心脏|猫群|拉全组|恐惧后|狂暴|关键职责缺失|场地组全灭|完全失控|同时爆炸|治疗压力失控|多次不同步|全部空蓝|持续回血|连续触云|漏门过多|关键触须失控|多人被控|脑内超时|减伤断档|两星同时|多人未进洞/.test(text)
+}
+
+function deathTolerance(boss: Boss): number {
+  return boss.healing_pressure === '极高' ? 0 : boss.healing_pressure === '高' ? 1 : 2
 }
 
 export function simulateCombat(seed: string, boss: Boss, attempt: number, team: TeamMember[], morale: number, pot: number): CombatResult {
@@ -222,14 +289,15 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const allData = team.map((m) => ({ m, h: hiddenById.get(m.id)!, s: currentSpec(m), p: publicById.get(m.id)! }))
   const baseSkill = avg(allData.map(({ h, s }) => n(s.skill) * 0.5 + n(h.mechanics) * 0.18 + n(h.awareness) * 0.14 + n(h.stability) * 0.1 + n(h.teamwork) * 0.08))
   const itemLevel = avg(allData.map(({ m, p }) => m.itemLevel ?? n(p.signup_item_level)))
-  const learn = avg(allData.map(({ h }) => n(h.learning)))
   const ilvlBonus = (itemLevel - 218) * 0.9
-  const attemptBonus = [0, 4, 7][attempt - 1] + ((learn - 65) / 18) * (attempt - 1)
+  const attemptBonus = avg(allData.map(({ h, s }) => personalLearningGain(h, s, attempt)))
   const moraleBonus = (morale - 70) * 0.12
   const interrupters = allData.filter(({ s }) => s.role !== '治疗' && !['鸟德', '暗牧'].includes(s.spec)).length
   const hasBloodlust = allData.some(({ p }) => p.class === '萨满')
   const hasCommander = allData.some(({ m }) => m.id === 'P092')
-  const hasEncourager = allData.some(({ m }) => m.id === 'P088')
+  const encourager = allData.find(({ h }) => [h.social_primary, h.social_secondary].includes('气氛组'))
+  const hasEncourager = Boolean(encourager)
+  const encouragerName = encourager?.p.name ?? '气氛组'
   const healerQuality = healers.length ? avg(healers.map((m) => {
     const h = hiddenById.get(m.id)!
     return n(currentSpec(m).skill) * .55 + n(h.awareness) * .15 + n(h.stability) * .15 + n(h.teamwork) * .15
@@ -273,27 +341,73 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   if (boss.boss_id === 'B03' && counts.远程DPS < 2) structurePenalty -= (2 - counts.远程DPS) * 7
 
   const eliteCoordinationBonus = baseSkill >= 88 ? 4 : baseSkill >= 84 ? 1.5 : 0
-  const teamPower = baseSkill + ilvlBonus + attemptBonus + moraleBonus + structurePenalty + eliteCoordinationBonus + (hasCommander ? 1.5 : 0)
-  const bossDc = n(boss.base_dc)
+  const observerBonus = boss.boss_id === 'B14' && team.some((member) => member.id === 'P094') ? 2 : 0
+  const allCustomRoster = allData.every(({ h }) => h.source_type === '玩家自建')
+  const customCohesionBonus = allCustomRoster ? 2.5 + clamp((78 - baseSkill) * .45, 0, 4.5) : 0
+  const customProgressionBonus = allCustomRoster ? clamp(Math.max(0, 76 - baseSkill) * .36 * (n(boss.order) - 1), 0, 28) : 0
+  const teamPower = baseSkill + ilvlBonus + attemptBonus + moraleBonus + structurePenalty + eliteCoordinationBonus + (hasCommander ? 1.5 : 0) + observerBonus + customCohesionBonus + customProgressionBonus
+  const progressionRelief: Record<string, number> = { B04: 2, B05: 2, B07: 2, B08: 3, B09: 3, B10: 4, B11: 5, B12: 4, B13: 3, B14: 22 }
+  const bossDc = n(boss.base_dc) - (progressionRelief[boss.boss_id] ?? 0)
   const events = bossEvents.filter((e) => e.boss_id === boss.boss_id)
   const profile = encounterProfile(boss.boss_id)
   const results: EventResult[] = []
+  const deaths: CombatDeath[] = []
+  const permanentlyDead = new Set<string>()
+  const usedBattleRes = new Set<string>()
+  const battleResSources = allData.filter(({ p }) => p.class === '德鲁伊' || p.class === '术士')
+  const tolerance = deathTolerance(boss)
   let danger = Math.max(0, bossDc + 7 - teamPower)
   let severe = false
   let responsible = ''
 
+  const recordDeath = (target: TeamMember, eventName: string, timeRatio: number) => {
+    const spec = currentSpec(target)
+    const targetPublic = publicById.get(target.id)!
+    let resurrectedBy: string | undefined
+    if (spec.role !== '坦克') {
+      if (targetPublic.class === '萨满' && !usedBattleRes.has(`self:${target.id}`)) {
+        usedBattleRes.add(`self:${target.id}`)
+        resurrectedBy = targetPublic.name
+      } else {
+        const source = battleResSources.find(({ m }) => m.id !== target.id && !permanentlyDead.has(m.id) && !usedBattleRes.has(m.id))
+        if (source) {
+          usedBattleRes.add(source.m.id)
+          resurrectedBy = source.p.name
+        }
+      }
+    }
+    const battleResurrected = Boolean(resurrectedBy)
+    if (!battleResurrected) permanentlyDead.add(target.id)
+    const death: CombatDeath = {
+      playerId: target.id,
+      name: targetPublic.name,
+      role: spec.role,
+      eventName,
+      timeRatio,
+      battleResurrected,
+      resurrectedBy,
+    }
+    deaths.push(death)
+    const fatal = spec.role === '坦克' || permanentlyDead.size > tolerance
+    return { death, fatal }
+  }
+
   for (const [eventIndex, event] of events.entries()) {
-    const targetPool = event.target.includes('坦') ? (tanks.length ? tanks : team)
-      : event.target.includes('治疗') ? (healers.length ? healers : team)
-        : event.target.includes('DPS') || event.target.includes('打断') ? (dps.length ? dps : team) : team
+    const alive = (members: TeamMember[]) => members.filter((member) => !permanentlyDead.has(member.id))
+    const livingTeam = alive(team)
+    const targetPool = event.target.includes('坦') ? (alive(tanks).length ? alive(tanks) : livingTeam)
+      : event.target.includes('治疗') ? (alive(healers).length ? alive(healers) : livingTeam)
+        : event.target.includes('DPS') || event.target.includes('打断') ? (alive(dps).length ? alive(dps) : livingTeam) : livingTeam
     const target = targetPool[Math.floor(rng() * targetPool.length)]
     const targetHidden = hiddenById.get(target.id)!
     const personalRoll = rngFor(seed, boss.boss_id, attempt, target.id, event.event_id, 'personality-event')()
-    let eventAbility = n(targetHidden.mechanics) * 0.35 + n(targetHidden.awareness) * 0.25 + n(targetHidden.stability) * 0.2 + n(targetHidden.teamwork) * 0.1 + n(currentSpec(target).skill) * 0.1
+    let eventAbility = n(targetHidden.mechanics) * 0.35 + n(targetHidden.awareness) * 0.25 + n(targetHidden.stability) * 0.2 + n(targetHidden.teamwork) * 0.1 + n(currentSpec(target).skill) * 0.1 + personalLearningGain(targetHidden, currentSpec(target), attempt)
     if (target.id === 'P086') eventAbility += personalRoll < .08 ? -28 : personalRoll > .9 ? 12 : 0
     if (target.id === 'P087' && personalRoll < .16) eventAbility -= 16
-    if (target.id === 'P091') eventAbility += profile.movement >= .4 ? -13 : 5
+    if ([targetHidden.social_primary, targetHidden.social_secondary].includes('宏依赖')) eventAbility += profile.movement >= .4 ? -13 : 5
     if (target.id === 'P090' && attempt > 1) eventAbility += 5
+    if (target.id === 'P094' && boss.boss_id === 'B14') eventAbility += 12
+    if (target.id === 'P095' && personalRoll < .04) eventAbility -= 22
     if (target.id === 'P092') eventAbility += 4
     if (target.id === 'P093' && /分组|传送|星星|报点|顺序/.test(event.event_name)) eventAbility -= 7
     const support = (teamPower - bossDc) * 0.65
@@ -321,25 +435,71 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
         '站位严丝合缝，地板技找了半天没找到受害者。',
         '指挥刚喊完就处理掉了，难得不是喊完才开始动。',
         '这轮很顺，连压力怪都暂时找不到开喷角度。',
+        '打断、转火、走位一气呵成，战斗记录干净得不像野团。',
+        '危险技能刚亮，全团已经提前散开，Boss像在对空气表演。',
+        '该停手的人真停了手，第一次没人用“最后一个技能已经按了”当借口。',
+        '治疗预读刚好压上，血线抖了一下又像什么都没发生。',
+        '两边小队同时处理完毕，没有人带着技能来主团串门。',
+        '目标标记才亮就被集火清掉，连团长的第二遍口令都省了。',
+        '关键技能留得很准，既没早交装死，也没晚交陪葬。',
+        '全团这轮像共用了一个脑子，而且难得是那个会玩的脑子。',
+        '机制落点规规矩矩，地板表示今晚这单生意不好做。',
+        '节奏稳得像排练过，团队频道安静到只剩技能音效。',
       ]
       results.push({ name: event.event_name, status: '成功', detail: personalizedEventDetail(target.id, event.event_name, '成功', cleanDetails[Math.floor(rng() * cleanDetails.length)], personalRoll), timeRatio })
-    } else if (roll <= chance + 15) {
+    } else if (roll <= chance + 15 || (target.id === 'P083' && personalRoll >= .22)) {
       danger += 7
       const targetName = publicById.get(target.id)?.name ?? '一名成员'
-      const rescuer = recoveryMember(event.event_name, target.id, team, rng)
-      const recoveryBy = publicById.get(rescuer.id)?.name ?? '队友'
-      results.push({ name: event.event_name, status: '险情', detail: personalizedEventDetail(target.id, event.event_name, '险情', event.soft_fail, personalRoll), responsible: targetName, recoveryBy, recovery: `${recoveryBy}：${recoveryText(event.event_name, targetName, rng)}`, timeRatio })
+      if (describesDeath(event.soft_fail)) {
+        const { death, fatal } = recordDeath(target, event.event_name, timeRatio)
+        danger += death.battleResurrected ? 4 : 10
+        const recovery = death.battleResurrected
+          ? (publicById.get(target.id)?.class === '萨满'
+              ? `${targetName}使用复生重新站起，但停手期间的输出/治疗已经损失。`
+              : `${death.resurrectedBy}战复了${targetName}，重新接回战斗节奏。`)
+          : `${targetName}未能复起，剩余成员继续作战。`
+        if (fatal) {
+          severe = true
+          responsible = target.id
+          const fatalDetail = currentSpec(target).role === '坦克'
+            ? `${event.soft_fail} 坦克阵亡后仇恨链立即崩溃。`
+            : `${event.soft_fail} 当前 Boss 最多容许 ${tolerance} 人持续减员，团队已无法维持战斗。`
+          results.push({ name: event.event_name, status: '失败', detail: personalizedEventDetail(target.id, event.event_name, '失败', fatalDetail, personalRoll), responsible: targetName, timeRatio })
+          break
+        }
+        results.push({ name: event.event_name, status: '险情', detail: personalizedEventDetail(target.id, event.event_name, '险情', event.soft_fail, personalRoll), responsible: targetName, recoveryBy: death.resurrectedBy, recovery, timeRatio })
+      } else {
+        const rescuer = recoveryMember(event.event_name, target.id, livingTeam, rng)
+        const recoveryBy = publicById.get(rescuer.id)?.name ?? '队友'
+        results.push({ name: event.event_name, status: '险情', detail: personalizedEventDetail(target.id, event.event_name, '险情', event.soft_fail, personalRoll), responsible: targetName, recoveryBy, recovery: `${recoveryBy}${recoveryText(event.event_name, targetName, rng)}`, timeRatio })
+      }
       responsible ||= target.id
     } else {
+      const targetName = publicById.get(target.id)?.name ?? '一名成员'
+      const personalDeath = describesDeath(event.hard_fail) && !isCatastrophicFailure(event.hard_fail)
+      if (personalDeath) {
+        const { death, fatal } = recordDeath(target, event.event_name, timeRatio)
+        danger += death.battleResurrected ? 10 : 16
+        if (!fatal) {
+          const recovery = death.battleResurrected
+            ? (publicById.get(target.id)?.class === '萨满'
+                ? `${targetName}使用复生重新加入战斗。`
+                : `${death.resurrectedBy}交出战复，${targetName}重新起身。`)
+            : `${targetName}阵亡后没有战复，团队带着 ${permanentlyDead.size} 人减员继续作战。`
+          results.push({ name: event.event_name, status: '险情', detail: personalizedEventDetail(target.id, event.event_name, '险情', event.hard_fail, personalRoll), responsible: targetName, recoveryBy: death.resurrectedBy, recovery, timeRatio })
+          responsible ||= target.id
+          continue
+        }
+      }
       danger += 18
       severe = true
       responsible = target.id
-      results.push({ name: event.event_name, status: '失败', detail: personalizedEventDetail(target.id, event.event_name, '失败', event.hard_fail, personalRoll), responsible: publicById.get(target.id)?.name, timeRatio })
+      results.push({ name: event.event_name, status: '失败', detail: personalizedEventDetail(target.id, event.event_name, '失败', event.hard_fail, personalRoll), responsible: targetName, timeRatio })
       break
     }
   }
 
-  const killChance = clamp(58 + (teamPower - bossDc) * 2.7 - danger * 0.65, 2, 96)
+  const killChance = clamp(58 + (teamPower - bossDc) * 2.7 - danger * 0.65 - permanentlyDead.size * 7, 2, 96)
   const killed = !severe && rng() * 100 < killChance
   const structuralFailure = !killed && Boolean(structureIssue)
   if (structuralFailure && structureIssue) {
@@ -356,8 +516,20 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     : clamp(Math.round(72 - (teamPower - bossDc) * 2.4 + danger * 0.75 + rng() * 18), 1, 96)
   if (!responsible) responsible = team[Math.floor(rng() * team.length)].id
   const blamedName = responsible === '团长' ? '团长' : publicById.get(responsible)?.name ?? '未知成员'
-  const failedEvent = results.find((r) => r.status === '失败') ?? results.find((r) => r.status === '险情')
-  const reason = killed ? '团队稳住了最后一轮机制，Boss含泪交货。' : (structuralFailure ? structureIssue!.reason : failedEvent?.detail ?? (counts.治疗 < 2 ? '治疗链无法覆盖持续团伤。' : '团队输出不足，Boss进入狂暴。'))
+  const failedEvent = results.find((r) => r.status === '失败')
+  const permanentNames = deaths.filter((death) => !death.battleResurrected).map((death) => death.name)
+  const reason = killed
+    ? deaths.length
+      ? `${deaths.length} 人次倒地、${deaths.length - permanentlyDead.size} 次战复后，剩余成员把 Boss 收掉了。`
+      : '团队稳住了最后一轮机制，Boss含泪交货。'
+    : structuralFailure
+      ? structureIssue!.reason
+      : failedEvent?.detail
+        ?? (permanentNames.length
+          ? `${permanentNames.join('、')}减员后，剩余成员没能维持输出与治疗节奏，Boss进入狂暴。`
+          : counts.治疗 < 2
+            ? '治疗链无法覆盖持续团伤，后半程资源耗尽后全团倒下。'
+            : '前面的险情已经处理完，但最后阶段输出与治疗资源同时见底，Boss进入狂暴。')
   const estimatedFullDuration = clamp(235 - (teamPower - bossDc) * 2.8 + rng() * 18, 105, 320)
   const duration = killed
     ? Math.round(estimatedFullDuration)
@@ -371,22 +543,34 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const meters: CombatMeter[] = allData.map(({ m, h: memberHidden, s, p }) => {
     const meterRng = rngFor(seed, boss.boss_id, attempt, m.id, m.currentSpec, 'meter')
     const gear = clamp(((m.itemLevel ?? n(p.signup_item_level)) - 200) / 32, 0, 1.16)
-    const composite = n(s.skill) * .42 + n(memberHidden.main_skill) * .18 + n(memberHidden.mechanics) * .15 + n(memberHidden.awareness) * .1 + n(memberHidden.stability) * .07 + n(s.boss_experience) * .08
-    const elite = composite >= 95 ? 1.09 : composite >= 90 ? 1.04 : composite < 62 ? .94 : 1
+    const composite = n(s.skill) * .3 + n(memberHidden.main_skill) * .15 + n(memberHidden.mechanics) * .15 + n(memberHidden.awareness) * .12 + n(memberHidden.stability) * .12 + n(memberHidden.teamwork) * .08 + n(s.boss_experience) * .08 + personalLearningGain(memberHidden, s, attempt) * .3
+    const elite = composite >= 95 ? 1.04 : composite >= 90 ? 1.02 : composite < 62 ? .96 : 1
     const encounter = outputModifier(boss.boss_id, s.role, p.class, composite)
+    const formSpread = .055 + clamp((85 - n(memberHidden.stability)) / 300, 0, .08)
+    const form = 1 + (meterRng() * 2 - 1) * formSpread
     let dps = 0
     let hps = 0
     if (s.role.includes('DPS')) {
-      dps = (1250 + gear * 1800 + composite * 52) * elite * encounter * (0.95 + meterRng() * 0.1) * failureFactor
+      dps = (2550 + gear * 1550 + composite * 37) * elite * encounter * form * failureFactor
     } else if (s.role === '坦克') {
-      dps = (760 + gear * 900 + composite * 20) * elite * (0.95 + meterRng() * 0.1) * failureFactor
+      dps = (900 + gear * 850 + composite * 18) * elite * form * failureFactor
     } else {
       dps = (100 + composite * 2.2) * (0.85 + meterRng() * 0.15)
-      hps = (1100 + gear * 1500 + composite * 42) * elite * encounter * (0.95 + meterRng() * 0.1) * (1 + Math.max(0, danger) / 180)
+      hps = (1450 + gear * 1350 + composite * 36) * elite * encounter * form * (1 + Math.max(0, danger) / 180)
     }
-    if (m.id === 'P086' && s.role.includes('DPS')) dps *= .84 + meterRng() * .34
-    if (m.id === 'P089' && bossDc >= 80) dps *= .88
-    if (m.id === 'P091' && s.role.includes('DPS')) dps *= profile.movement < .3 ? 1.1 : 1 - profile.movement * .32
+    if (m.id === 'P081' && s.role.includes('DPS')) dps *= .97
+    if (m.id === 'P086' && s.role.includes('DPS')) dps *= .9 + meterRng() * .22
+    if (m.id === 'P089' && bossDc >= 80) dps *= .92
+    if ([memberHidden.social_primary, memberHidden.social_secondary].includes('宏依赖') && s.role.includes('DPS')) dps *= profile.movement < .3 ? 1.06 : 1 - profile.movement * .28
+    if (m.id === 'P094' && boss.boss_id === 'B14') {
+      if (s.role.includes('DPS')) dps *= 1.14
+      if (s.role === '治疗') hps *= 1.14
+    }
+    const memberDeaths = deaths.filter((death) => death.playerId === m.id)
+    const downtime = memberDeaths.reduce((sum, death) => sum + (death.battleResurrected ? .08 : 1 - death.timeRatio), 0)
+    const activeRatio = clamp(1 - downtime, .08, 1)
+    dps *= activeRatio
+    hps *= activeRatio
     dps = Math.max(0, Math.round(dps))
     hps = Math.max(0, Math.round(hps))
     return {
@@ -399,6 +583,9 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
       hps,
       damage: dps * duration,
       healing: hps * duration,
+      died: memberDeaths.length > 0,
+      battleResurrected: memberDeaths.some((death) => death.battleResurrected),
+      activeRatio,
     }
   })
   const teamDps = meters.reduce((sum, meter) => sum + meter.dps, 0)
@@ -406,13 +593,13 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
 
   if (attempt === 1 && team.some((member) => member.id === 'P092') && rngFor(seed, boss.boss_id, 'P092', 'rule-ban')() < .001) {
     const banEvent: EventResult = { name: '系统制裁', status: '失败', detail: '初中肄业研究规则漏洞时把自己研究进了封号名单，角色原地掉线。', responsible: '初中肄业', timeRatio: .08 }
-    return { bossId: boss.boss_id, attempt, killed: false, remainingHp: 99, events: [banEvent], reason: '核心坦克被系统封禁，团队甚至没来得及讨论这算不算机制。', responsible: 'P092', chat: ['系统：初中肄业的账号已被暂时冻结。', '团长：他研究规则的最终成果出来了。', '队员：这Boss掉落里有申诉链接吗？'], leaver: 'P092', leaveType: '违规封号', leaveReason: '初中肄业因研究规则漏洞触发了极低概率的封号事件，被迫离开团队。', moraleDelta: -10, moraleReason: '指挥兼主坦被系统抬走，全团开始重新理解“不可抗力”', duration: 30, teamDps, teamHps, meters }
+    return { bossId: boss.boss_id, attempt, killed: false, remainingHp: 99, events: [banEvent], reason: '核心坦克被系统封禁，团队甚至没来得及讨论这算不算机制。', responsible: 'P092', chat: ['系统：初中肄业的账号已被暂时冻结。', '团长：他研究规则的最终成果出来了。', '队员：这Boss掉落里有申诉链接吗？'], leaver: 'P092', leaveType: '违规封号', leaveReason: '初中肄业因研究规则漏洞触发了极低概率的封号事件，被迫离开团队。', moraleDelta: -10, moraleReason: '指挥兼主坦被系统抬走，全团开始重新理解“不可抗力”', duration: 30, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
   }
 
   if (killed) {
     const cleanKill = results.every((event) => event.status === '成功')
     const moraleDelta = (cleanKill ? 4 : 1) + (hasEncourager ? 1 : 0)
-    return { bossId: boss.boss_id, attempt, killed, remainingHp: 0, events: results, reason, responsible: '', chat: [], moraleDelta, moraleReason: cleanKill ? (hasEncourager ? '干净击杀，美味小熊饼干已经开始在团队频道发庆功表情' : '全程没出岔子，干净击杀') : (hasEncourager ? '险情救回来了，美味小熊饼干把气氛重新抬了起来' : '中间有险情，但最后救回来了'), duration, teamDps, teamHps, meters }
+    return { bossId: boss.boss_id, attempt, killed, remainingHp: 0, events: results, reason, responsible: '', chat: [], moraleDelta, moraleReason: cleanKill ? (hasEncourager ? `干净击杀，${encouragerName}已经开始在团队频道发庆功表情` : '全程没出岔子，干净击杀') : deaths.length ? `${deaths.length} 人次倒地、${deaths.length - permanentlyDead.size} 次战复后完成击杀` : (hasEncourager ? `险情救回来了，${encouragerName}把气氛重新抬了起来` : '中间有险情，但最后救回来了'), duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
   }
 
   const baseMoraleLoss = remainingHp < 10 ? -Math.ceil([8, 12, 16][attempt - 1] / 2) : -[8, 12, 16][attempt - 1]
@@ -435,26 +622,30 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     const ownLines = ['我的我的，手慢了，下把不会。', '这波我背，刚才技能交晚了。', '看见了，我锅，下把提前走。', '行，录像不用回放了，主角就是我。', '我刚才脑子短暂掉线，下把把它接回来。']
     const denyLines = ['不是我吧，我这边技能交了。', '我按口令走的，前面先崩的。', '我没吃到啊，别啥都先点我。', '先别急着判，我觉得战斗记录也可能看错人。', '这技能追着我来的，严格说是Boss针对。']
     const answerPool = h.social_primary === '责任型' || n(h.claim_honesty) > 70 ? ownLines : denyLines
-    chat = [leaderLines[Math.floor(chatRng() * leaderLines.length)], `${blamedName}：${answerPool[Math.floor(chatRng() * answerPool.length)]}`]
+    const personalityAnswer = pickChatTemplate('灭团', [h.social_primary, h.social_secondary], chatRng)
+    chat = [leaderLines[Math.floor(chatRng() * leaderLines.length)]]
+    if (isQuietPlayer(h)) chat.push(`${blamedName}没开麦，也没抢着解释，只在原地跳了一下表示收到。`)
+    else chat.push(`${blamedName}：${personalityAnswer ?? answerPool[Math.floor(chatRng() * answerPool.length)]}`)
   }
-  const pressure = allData.find(({ h: th }) => th.social_primary === '压力怪' || th.social_secondary === '压力怪')
-  const mediator = allData.find(({ h: th }) => th.social_primary === '调解者' || th.social_secondary === '调解者')
+  const pressure = allData.find(({ h: th }) => !isQuietPlayer(th) && (th.social_primary === '压力怪' || th.social_secondary === '压力怪'))
+  const mediator = allData.find(({ h: th }) => !isQuietPlayer(th) && (th.social_primary === '调解者' || th.social_secondary === '调解者'))
   if (pressure) {
     const lines = ['这都能中？闭眼打的？', '不会机制早说，别拿全团陪练。', '三把机会是给你现场学机制的？', 'DPS先别看表了，地板都快被你踩穿了。', '我奶宠物都没这么费劲。', '你这走位属于技能去哪你去哪。']
-    chat.push(`${pressure.p.name}：${lines[Math.floor(chatRng() * lines.length)]}`)
+    chat.push(`${pressure.p.name}：${pickChatTemplate('灭团', [pressure.h.social_primary, pressure.h.social_secondary], chatRng) ?? lines[Math.floor(chatRng() * lines.length)]}`)
   }
   if (mediator) {
     const lines = ['行了行了，知道哪炸的就下一把。', '别吵了，打断顺序重排一下就行。', '先拉人，嘴留着过了再喷。', '先把Boss过了，散团小作文晚点写。', '有空打字说明蓝还够，赶紧坐地板回蓝。']
-    chat.push(`${mediator.p.name}：${lines[Math.floor(chatRng() * lines.length)]}`)
+    chat.push(`${mediator.p.name}：${pickChatTemplate('灭团', ['调解者', '气氛组'], chatRng) ?? lines[Math.floor(chatRng() * lines.length)]}`)
   }
-  const instigator = allData.find(({ h: th }) => th.social_primary === '拱火者' || th.social_secondary === '拱火者')
+  const instigator = allData.find(({ h: th }) => !isQuietPlayer(th) && (th.social_primary === '拱火者' || th.social_secondary === '拱火者'))
   if (instigator && instigator.m.id !== pressure?.m.id) {
     const lines = ['我不说是谁，反正战斗记录有名字。', '刚才那波挺精彩的，建议保存录像。', '没事，再来一把总有人能学会。', '这把唯一稳定发挥的是修理费。', '我宣布地板伤害再次拿下全场第一。']
-    chat.push(`${instigator.p.name}：${lines[Math.floor(chatRng() * lines.length)]}`)
+    chat.push(`${instigator.p.name}：${pickChatTemplate('灭团', ['拱火者'], chatRng) ?? lines[Math.floor(chatRng() * lines.length)]}`)
   }
 
   let leaver: string | undefined
   for (const { m, h: memberHidden } of attempt >= 3 ? [] : allData) {
+    if (memberHidden.leave_policy === '永不主动退队') continue
     const attemptScale = [0.1, 0.38, 0.82][attempt - 1]
     let rate = n(memberHidden.base_leave_pct) * attemptScale + [0, 1.5, 5][attempt - 1]
     if (morale + moraleDelta < 45) rate += [1, 4, 8][attempt - 1]
@@ -469,6 +660,7 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     if (hasEncourager) rate -= 2
     if (hasCommander) rate -= 1
     if (m.id === 'P092' && baseSkill < 75) rate += (75 - baseSkill) * .25
+    if (m.id === 'P095' && attempt >= 2 && (remainingHp > 35 || baseSkill < 80)) rate += 14
     rate = clamp(rate, 0, 45)
     if (!leaver && rng() * 100 < rate) leaver = m.id
   }
@@ -481,6 +673,7 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     const isSilent = [leaveHidden.social_primary, leaveHidden.social_secondary].some((trait) => trait === '沉默型' || trait === '不开麦')
     const isCombative = [leaveHidden.social_primary, leaveHidden.social_secondary].some((trait) => ['压力怪', '嘴硬型', '自信型', '拱火者'].includes(trait))
     const lowExpectedShare = pot / Math.max(team.length, 1) < 1000
+    const leaveLine = pickChatTemplate('退团', [leaveHidden.social_primary, leaveHidden.social_secondary, isSilent ? '沉默型' : '', isCombative ? '压力怪' : '', lowExpectedShare ? '没出装备' : '', '找借口'].filter(Boolean), () => leaveRng)
     if (isSilent && leaveRng < 0.72) {
       leaveType = '战术下线'
       leaveReason = `${leaveName}在连续灭团后始终没有回应，随后角色直接离线，团队无法继续。`
@@ -488,32 +681,32 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     } else if (isCombative && leaveRng < 0.76) {
       leaveType = '开喷退团'
       leaveReason = `${leaveName}对复盘和责任划分不满，争执升级后主动退团。`
-      chat.push(`${leaveName}：这打法根本过不了，谁爱陪谁陪。`, `团长：有问题说问题，别直接甩锅。`, `系统：${leaveName} 离开了团队。`)
+      chat.push(`${leaveName}：${leaveLine ?? '这打法根本过不了，谁爱陪谁陪。'}`, `团长：有问题说问题，别直接甩锅。`, `系统：${leaveName} 离开了团队。`)
     } else if (lowExpectedShare && leaveHidden.economy_type === '排骨党') {
       leaveType = '直接退团'
       leaveReason = `${leaveName}认为当前进度和金池不成比例，不愿继续承担灭团成本。`
-      chat.push(`${leaveName}：打到现在金池才这点，没必要继续耗。`, `系统：${leaveName} 离开了团队。`)
+      chat.push(`${leaveName}：${leaveLine ?? '打到现在金池才这点，没必要继续耗。'}`, `系统：${leaveName} 离开了团队。`)
     } else if (leaver === responsible && leaveHidden.social_primary === '玻璃心') {
       leaveType = '直接退团'
       leaveReason = `${leaveName}在失误被点名后心态崩溃，拒绝继续尝试。`
-      chat.push(`${leaveName}：行，都算我的，我不打了。`, `系统：${leaveName} 离开了团队。`)
+      chat.push(`${leaveName}：${leaveLine ?? '行，都算我的，我不打了。'}`, `系统：${leaveName} 离开了团队。`)
     } else if (leaveRng < 0.34) {
       leaveType = '借故离开'
       leaveReason = `${leaveName}在灭团后表示临时有事，未等替补便退出团队。`
-      chat.push(`${leaveName}：临时有事，真打不了了。`, `团长：现在退人就直接散了。`, `系统：${leaveName} 离开了团队。`)
+      chat.push(`${leaveName}：${leaveLine ?? '临时有事，真打不了了。'}`, `团长：现在退人就直接散了。`, `系统：${leaveName} 离开了团队。`)
     } else if (leaveRng < 0.6) {
       leaveType = '战术下线'
       leaveReason = `${leaveName}没有解释原因，灭团复盘期间突然下线。`
-      chat.push(`${leaveName}：掉了。`, `系统：${leaveName} 已离线。`)
+      chat.push(`${leaveName}：${leaveLine ?? '掉了。'}`, `系统：${leaveName} 已离线。`)
     } else {
       leaveType = '直接退团'
       leaveReason = `${leaveName}判断团队短时间内无法通过当前 Boss，选择及时止损。`
-      chat.push(`${leaveName}：状态不对，继续打也是三灭，我先走了。`, `系统：${leaveName} 离开了团队。`)
+      chat.push(`${leaveName}：${leaveLine ?? '状态不对，继续打也是三灭，我先走了。'}`, `系统：${leaveName} 离开了团队。`)
     }
   }
   if (attempt >= 3) chat.push('团长：三把打完了，今天就到这，散。', '系统：本 Boss 三次尝试均告失败。')
   const moraleReason = structuralFailure ? `职责配置失衡，团长背锅：${structureIssue!.reason}` : remainingHp < 10 ? `只差 ${remainingHp}% 灭团，大家觉得还有机会` : `第 ${attempt} 次灭团，Boss 还剩 ${remainingHp}%`
-  return { bossId: boss.boss_id, attempt, killed, remainingHp, events: results, reason, responsible, chat, leaver, leaveType, leaveReason, moraleDelta, moraleReason, duration, teamDps, teamHps, meters }
+  return { bossId: boss.boss_id, attempt, killed, remainingHp, events: results, reason, responsible, chat, leaver, leaveType, leaveReason, moraleDelta, moraleReason, duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
 }
 
 export function itemStartPrice(item: LootItem): number {
@@ -554,71 +747,70 @@ export function runAuction(seed: string, boss: Boss, team: TeamMember[]): { reco
   const moraleReasons: string[] = []
 
   for (const item of drops) {
-    const quality: Record<string, number> = { C: 0, B: 5, A: 12, S: 22, 'S+': 32 }
-    const referenceMultiplier: Record<string, number> = { 大老板: 1.7, 小老板: 1.05, 实力消费: 0.95, 毕业装党: 1.35, 武器饰品党: 1.1, 捡漏型: 0.55, 排骨党: 0.25, 口嗨消费: 0.45 }
+    const quality: Record<string, number> = { C: 0, B: 6, A: 15, S: 30, 'S+': 42 }
+    const capRanges: Record<string, [number, number]> = {
+      大老板: [1.15, 2.15], 小老板: [.76, 1.18], 实力消费: [.82, 1.2], 毕业装党: [.72, 1.08],
+      武器饰品党: [.62, 1.02], 捡漏型: [.38, .7], 排骨党: [.24, .48], 口嗨消费: [.36, .68], 简陋型: [.34, .66],
+    }
     const bids: Bid[] = []
     for (const member of nextTeam) {
       if (!eligible(item, member)) continue
       const h = hiddenById.get(member.id)!
       const rng = rngFor(seed, boss.boss_id, item.loot_id, member.id, 'bid')
       const pref = h.purchase_preference.includes(item.category) || h.purchase_preference.includes(item.grade) || h.purchase_preference === '全部'
-      let desire = n(h.spend_willingness) + quality[item.grade] + (pref ? 18 : -8) + (rng() * 32 - 16)
+      let desire = n(h.spend_willingness) + quality[item.grade] + (pref ? 22 : -8) + (rng() * 30 - 15)
       if (h.economy_type === '排骨党') desire -= 20
       if (h.economy_type === '毕业装党' && ['S', 'S+'].includes(item.grade)) desire += 20
-      if (desire < 42) continue
+      const desireThreshold = ({ C: 66, B: 63, A: 56, S: 44, 'S+': 40 } as const)[item.grade]
+      if (desire < desireThreshold) continue
       const reference = itemReferencePrice(item)
       const start = itemStartPrice(item)
-      let bidFactor = 0.9 + rng() * 0.6
-      if (h.economy_type === '大老板') bidFactor = 2.8 + rng() * 3.6
-      else if (h.economy_type === '小老板') bidFactor = 1 + rng() * 1.2
-      else if (h.economy_type === '实力消费') bidFactor = .95 + rng() * .95
-      else if (h.economy_type === '毕业装党') bidFactor = ['S', 'S+'].includes(item.grade) ? 1.8 + rng() * 2.2 : .9 + rng() * .5
-      else if (h.economy_type === '武器饰品党') bidFactor = pref ? 1 + rng() * 1.1 : .88 + rng() * .52
-      else if (h.economy_type === '捡漏型') bidFactor = .88 + rng() * .42
-      else if (h.economy_type === '排骨党') bidFactor = .82 + rng() * .28
-      else if (h.economy_type === '口嗨消费') bidFactor = .88 + rng() * .42
-      const max = Math.floor(Math.min(member.wallet - n(h.reserve_gold), reference * (referenceMultiplier[h.economy_type] ?? 0.8), start * bidFactor) / 100) * 100
-      if (max >= itemStartPrice(item)) bids.push({ playerId: member.id, name: publicById.get(member.id)!.name, max })
+      let [floorFactor, ceilingFactor] = capRanges[h.economy_type] ?? [.5, .9]
+      if (h.economy_type === '毕业装党' && ['S', 'S+'].includes(item.grade)) [floorFactor, ceilingFactor] = [1.05, 1.72]
+      if (h.economy_type === '武器饰品党' && pref) [floorFactor, ceilingFactor] = [.92, 1.38]
+      const aggressionBonus = clamp(n(h.bid_aggression) / 100, 0, 1) * .12
+      const preferenceBonus = pref ? .08 : 0
+      const maxFactor = floorFactor + rng() * (ceilingFactor - floorFactor) + aggressionBonus + preferenceBonus
+      const max = Math.floor(Math.min(member.wallet - n(h.reserve_gold), reference * maxFactor) / 100) * 100
+      if (max >= start) bids.push({ playerId: member.id, name: publicById.get(member.id)!.name, max })
     }
     bids.sort((a, b) => b.max - a.max)
     const start = itemStartPrice(item)
     const reference = itemReferencePrice(item)
-    const auctionShape = rngFor(seed, boss.boss_id, item.loot_id, 'auction-shape')()
     const willing = bids.filter((b) => b.max >= start)
-    const fallback = nextTeam.filter((member) => {
-      if (!eligible(item, member)) return false
-      const hidden = hiddenById.get(member.id)!
-      return member.wallet - n(hidden.reserve_gold) >= start
-    }).map((member) => ({ playerId: member.id, name: publicById.get(member.id)!.name, max: start }))
-    const qualified = willing.length ? willing : fallback.slice(0, 1)
-    let buyer: Bid | undefined = auctionShape < .09 ? undefined : qualified[0]
+    const quietMarketChance = ({ C: .34, B: .28, A: .14, S: .02, 'S+': .01 } as const)[item.grade]
+    const quietMarket = rngFor(seed, boss.boss_id, item.loot_id, 'quiet-market')() < quietMarketChance
+    const buyer = willing[0]
     let price = 0
     let salvaged = false
     const log = [`团长：${item.item_name}，${start.toLocaleString()}G 起。`]
     if (buyer) {
-      const basePriceSale = auctionShape < .2
       const bidFlowRng = rngFor(seed, boss.boss_id, item.loot_id, 'bid-flow')
       const clearingRaises = start >= 1000 ? [100, 200, 200, 500] : [100, 100, 200, 500]
       const clearingRaise = clearingRaises[Math.floor(bidFlowRng() * clearingRaises.length)]
-      price = basePriceSale || qualified.length === 1 ? start : Math.min(buyer.max, qualified[1].max + clearingRaise)
+      const challenger = quietMarket ? undefined : willing[1]
+      price = challenger ? Math.min(buyer.max, challenger.max + clearingRaise) : start
       if (price === start) {
         log.push(`${buyer.name}：${start.toLocaleString()}G`)
       } else {
+        const activeChallenger = challenger!
         const amounts = [start]
         let current = start
-        while (current < price) {
+        const competitiveCeiling = Math.min(activeChallenger.max, price)
+        while (current < competitiveCeiling) {
           const stepChoices = amounts.length >= 20 ? [500] : current >= 1000 ? [100, 100, 200, 200, 500] : [100, 100, 100, 200]
           const increment = stepChoices[Math.floor(bidFlowRng() * stepChoices.length)]
-          current = Math.min(price, current + increment)
+          current = Math.min(competitiveCeiling, current + increment)
           if (current > amounts.at(-1)!) amounts.push(current)
         }
-        let previousBidder = ''
+        if (price > amounts.at(-1)!) amounts.push(price)
         amounts.forEach((amount, index) => {
-          const possible = qualified.filter((bidder) => bidder.max >= amount && bidder.playerId !== previousBidder)
-          const bidder = index === amounts.length - 1 ? buyer! : possible[Math.floor(bidFlowRng() * possible.length)] ?? buyer!
+          const turnsUntilFinal = amounts.length - 1 - index
+          const bidder = turnsUntilFinal % 2 === 0 ? buyer : activeChallenger
           log.push(`${bidder.name}：${amount.toLocaleString()}G`)
-          previousBidder = bidder.playerId
         })
+        const loserLines = ['让了', '不跟了', '这个价你拿', 'P', '超预算了']
+        log.push(`${activeChallenger.name}：${loserLines[Math.floor(bidFlowRng() * loserLines.length)]}`)
       }
       log.push(`成交：${buyer.name}，${price.toLocaleString()}G。`)
     } else {

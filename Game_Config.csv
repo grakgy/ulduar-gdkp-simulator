@@ -1,6 +1,6 @@
 ﻿key,value,description
 game_title,奥杜尔十人金团模拟器,静态前端MVP
-player_pool_size,85,当前85人；后续可直接在Players_Public、Players_Hidden、Player_Specs追加
+player_pool_size,40,每局固定加入全部玩家自建人物，再从随机生成人物中按seed补满40人
 raid_size,10,玩家是团长/经理，不占战斗名额
 offer_min,3,每轮申请人数下限
 offer_max,5,每轮申请人数上限
