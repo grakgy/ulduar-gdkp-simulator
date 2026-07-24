@@ -9,9 +9,11 @@ try {
   const recruitLikePlayer = (seed) => {
     const pool = data.playersForSeed(seed)
     const team = []
+    const caiFamilyIds = new Set(['P108', 'P115', 'P117'])
     for (let round = 0; round < 10; round += 1) {
       const selected = new Set(team.map((member) => member.id))
-      const available = pool.filter((player) => !selected.has(player.player_id))
+      const caiFamilyChosen = team.some((member) => caiFamilyIds.has(member.id))
+      const available = pool.filter((player) => !selected.has(player.player_id) && !(caiFamilyChosen && caiFamilyIds.has(player.player_id)))
       const roundSeed = `${seed}|round:${round}|team:${team.map((member) => member.id).join(',')}`
       const candidates = engine.shuffled(available, roundSeed).slice(0, 5)
       const counts = { 坦克: 0, 治疗: 0, DPS: 0 }
@@ -37,9 +39,19 @@ try {
     return team
   }
 
-  const fixedTeam = (ids) => (seed) => ids.map((id) => engine.createMember(id, seed))
-  const strongCustomIds = ['P092', 'P101', 'P082', 'P096', 'P081', 'P084', 'P093', 'P095', 'P097', 'P086']
-  const weakCustomIds = ['P083', 'P101', 'P090', 'P099', 'P088', 'P098', 'P087', 'P089', 'P100', 'P085']
+  const fixedTeam = (members) => (seed) => members.map(({ id, spec }) => ({ ...engine.createMember(id, seed), ...(spec ? { currentSpec: spec } : {}) }))
+  const strongCustom = [
+    { id: 'P092' }, { id: 'P101' }, { id: 'P082' }, { id: 'P096' },
+    { id: 'P081' }, { id: 'P084' }, { id: 'P093', spec: '暗牧' }, { id: 'P103' }, { id: 'P097' }, { id: 'P086' },
+  ]
+  const normalCustom = [
+    { id: 'P092' }, { id: 'P101' }, { id: 'P082' }, { id: 'P096' },
+    { id: 'P103' }, { id: 'P110' }, { id: 'P111' }, { id: 'P097' }, { id: 'P114' }, { id: 'P081' },
+  ]
+  const weakCustom = [
+    { id: 'P083' }, { id: 'P101' }, { id: 'P117' }, { id: 'P099' },
+    { id: 'P087' }, { id: 'P116' }, { id: 'P109' }, { id: 'P113' }, { id: 'P098' }, { id: 'P089' },
+  ]
 
   const playRun = (seed, makeTeam) => {
     let team = makeTeam(seed)
@@ -83,15 +95,18 @@ try {
 
   const result = {
     publicRecruitStrategy: sample('公开信息均衡选人', recruitLikePlayer, 1000),
-    strongCustomTeam: sample('较强全自建阵容', fixedTeam(strongCustomIds), 2000),
-    weakCustomTeam: sample('较弱全自建阵容', fixedTeam(weakCustomIds), 2000),
+    strongCustomTeam: sample('高手全自建阵容', fixedTeam(strongCustom), 3000),
+    normalCustomTeam: sample('普通全自建阵容', fixedTeam(normalCustom), 3000),
+    weakCustomTeam: sample('较差全自建阵容', fixedTeam(weakCustom), 3000),
   }
 
   console.log(JSON.stringify(result, null, 2))
   const strong = result.strongCustomTeam
+  const normal = result.normalCustomTeam
   const weak = result.weakCustomTeam
-  if (strong.reachedAlgalonRate < .5 || strong.reachedAlgalonRate > .6 || strong.fullClearRate < .27 || strong.fullClearRate > .34) process.exitCode = 1
-  if (weak.reachedAlgalonRate < .1 || weak.reachedAlgalonRate > .2 || weak.fullClearRate < .03 || weak.fullClearRate > .05) process.exitCode = 1
+  if (strong.fullClearRate < .27 || strong.fullClearRate > .33) process.exitCode = 1
+  if (normal.fullClearRate < .08 || normal.fullClearRate > .12) process.exitCode = 1
+  if (weak.fullClearRate < .005 || weak.fullClearRate > .015) process.exitCode = 1
 } finally {
   await server.close()
 }

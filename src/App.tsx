@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { bosses, chatTemplates, playersForSeed, publicById, type Boss, type PublicPlayer } from './data'
+import { bosses, chatTemplates, combatLogTemplates, hiddenById, playersForSeed, publicById, type Boss, type CombatLogTemplate, type PublicPlayer } from './data'
 import { createMember, currentSpec, dynamicItemLevel, itemReferencePrice, itemStartPrice, publicSpecs, rngFor, roleCounts, runAuction, shuffled, simulateCombat, type AuctionRecord, type CombatMeter, type CombatResult, type TeamMember } from './engine'
-import recruitBackgroundUrl from '../photo/background01.jpg'
+import { resolveRunEnding } from './endings'
+import introBackgroundUrl from '../photo/ad03ffb9-75a6-4655-a5e5-0b185e7e7555.png'
 
 const bossBackgroundModules = import.meta.glob('../photo/boss/*.jpg', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
+const recruitBackgroundUrl = bossBackgroundModules['../photo/boss/B01.jpg']
 
 type Phase = 'intro' | 'recruit' | 'prep' | 'combat' | 'auction' | 'result'
 type EndReason = '全通MVP' | '三次失败' | '成员退团散团' | ''
@@ -27,12 +29,13 @@ interface GameState {
   endReason: EndReason
 }
 
-const STORAGE_KEY = 'ulduar-gdkp-full-v11'
+const STORAGE_KEY = 'ulduar-gdkp-full-v12'
 const freshSeed = () => {
   const randomPart = typeof crypto !== 'undefined' && 'getRandomValues' in crypto ? crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 0xffffffff)
   return `${Date.now()}-${randomPart}`
 }
 const initialState = (seed = freshSeed()): GameState => ({ phase: 'intro', seed, recruitRound: 0, team: [], bossIndex: 0, bossAttempts: 0, morale: 70, pot: 0, histories: [], auctions: [], moraleLog: [], endReason: '' })
+const caiFamilyIds = new Set(['P108', 'P115', 'P117'])
 
 const classColors: Record<string, string> = { 死亡骑士: '#c84c5b', 德鲁伊: '#ff8d24', 猎人: '#91c66c', 法师: '#74d0ef', 圣骑士: '#f39ac0', 牧师: '#f1f1e8', 盗贼: '#f1db55', 萨满: '#4b7cff', 术士: '#9382d9', 战士: '#c69a68' }
 const gold = (value: number) => `${Math.floor(value).toLocaleString()}G`
@@ -65,7 +68,7 @@ export function publicWhisper(player: PublicPlayer, seed: string, round: number)
   if (customPlayer) {
     const customOptions = player.whisper_pool.split('|').filter(Boolean).map((line) => {
       let normalized = line.replace(/大号全通|成就在大号/g, '全通经验').trim()
-      if (pureDps) normalized = normalized.replace(new RegExp(`^${player.signup_spec}\\s*`), '').trim()
+      if (pureDps) normalized = normalized.replaceAll(player.signup_spec, '').replace(/\s+/g, ' ').trim()
       else normalized = normalized.replace(/\s+(?:1|111)$/, '').trim()
       return normalized
     }).filter(Boolean)
@@ -101,7 +104,7 @@ export function publicWhisper(player: PublicPlayer, seed: string, round: number)
   }
   const options = player.whisper_pool.split('|').filter(Boolean).map((line) => {
     let normalized = line.replace(/大号全通|成就在大号/g, '全通经验').trim()
-    if (pureDps) normalized = normalized.replace(new RegExp(`^${player.signup_spec}\\s*`), '').trim()
+    if (pureDps) normalized = normalized.replaceAll(player.signup_spec, '').replace(/\s+/g, ' ').trim()
     if (!pureDps) normalized = normalized.replace(/\s+(?:1|111)$/, '').trim()
     return normalized
   }).filter(Boolean)
@@ -116,8 +119,18 @@ function sceneStyle(imageUrl: string) {
   return { '--scene-image': `url("${imageUrl}")` } as React.CSSProperties
 }
 
+function combatCopy(category: CombatLogTemplate['category'], rng: () => number, variables: Record<string, string | number>) {
+  const options = combatLogTemplates.filter((entry) => entry.category === category)
+  const template = options[Math.floor(rng() * options.length)]?.template ?? ''
+  return Object.entries(variables).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template)
+}
+
 function bossSceneStyle(boss: Boss) {
   return sceneStyle(bossBackgroundModules[`../photo/boss/${boss.boss_id}.jpg`])
+}
+
+export function payoutEligible(team: TeamMember[]) {
+  return team.filter((member) => !member.left)
 }
 
 function publicIntro(player: PublicPlayer, itemLevel = Number(player.signup_item_level)) {
@@ -143,7 +156,8 @@ function App() {
   const playerPool = useMemo(() => playersForSeed(game.seed), [game.seed])
   const candidates = useMemo(() => {
     const selected = new Set(game.team.map((member) => member.id))
-    const available = playerPool.filter((player) => !selected.has(player.player_id))
+    const caiFamilyChosen = game.team.some((member) => caiFamilyIds.has(member.id))
+    const available = playerPool.filter((player) => !selected.has(player.player_id) && !(caiFamilyChosen && caiFamilyIds.has(player.player_id)))
     const roundSeed = `${game.seed}|round:${game.recruitRound}|team:${game.team.map((member) => member.id).join(',')}`
     return shuffled(available, roundSeed).slice(0, 5)
   }, [game.seed, game.recruitRound, game.team, playerPool])
@@ -194,7 +208,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Header game={game} onRestart={restart} />
+      {game.phase !== 'intro' && <Header game={game} onRestart={restart} />}
       <main>
         {game.phase === 'auction' && <MoraleHistory entries={game.moraleLog ?? []} limit={6} />}
         {game.phase === 'intro' && <Intro onStart={start} />}
@@ -215,11 +229,11 @@ function Header({ game, onRestart }: { game: GameState; onRestart: () => void })
 }
 
 function Intro({ onStart }: { onStart: () => void }) {
-  return <section className="intro page"><div className="eyebrow">ULDUAR / 10 PLAYER GDKP</div><h1>你选的十个人，<br/><em>能把金分了吗？</em></h1><p className="intro-copy">十轮五选一，没有后悔药。带队挑战完整奥杜尔，在灭团、压力和装备竞价里验证你的识人眼光。</p><div className="intro-actions"><button className="primary large" onClick={onStart}>开始招募 <span>→</span></button></div><div className="rule-strip"><div><b>10</b><span>轮招募</span></div><div><b>{bosses.length}</b><span>个首领</span></div><div><b>3</b><span>次机会</span></div><div><b>2</b><span>件掉落</span></div></div><p className="fineprint">每次重新开团都会自动生成新局；同一局内的阵容与专精结果保持可复现。进度自动保存在本机。</p></section>
+  return <section className="intro-image" style={{ backgroundImage: `url("${introBackgroundUrl}")` }}><button className="intro-restart-hotspot" aria-label="重新开团" onClick={onStart}/><button className="intro-start-hotspot" aria-label="开始招募" onClick={onStart}/></section>
 }
 
 function Recruitment({ round, candidates, team, seed, onRecruit }: { round: number; candidates: PublicPlayer[]; team: TeamMember[]; seed: string; onRecruit: (p: PublicPlayer) => void }) {
-  return <section className="page recruit-page scene-page recruit-scene" style={sceneStyle(recruitBackgroundUrl)}><div className="page-heading"><div><div className="eyebrow">RECRUITMENT · ROUND {round + 1}</div><h2>本轮只收一个</h2><p>未选中的四人回到候选池，后续轮次仍可能再次出现。</p></div><div className="round-dots" aria-label={`第${round + 1}轮`}>{Array.from({ length: 10 }, (_, i) => <i key={i} className={i < round ? 'done' : i === round ? 'active' : ''}>{i + 1}</i>)}</div></div><div className="recruit-layout"><div className="candidate-grid">{candidates.map((p) => <CandidateCard key={p.player_id} player={p} seed={seed} round={round} onChoose={() => onRecruit(p)} />)}</div><aside className="roster-panel"><div className="panel-title"><span>当前团队 · 公开信息</span><b>{team.length}<small>/10</small></b></div>{team.length === 0 ? <div className="empty-roster">名单还是空的。<br/>第一手最见团长功力。</div> : <div className="compact-roster">{team.map((m, i) => { const p = publicById.get(m.id)!; return <div className="compact-member person-hover" data-intro={publicIntro(p, m.itemLevel)} style={classStyle(p.class)} key={m.id}><span className="roster-no">{String(i + 1).padStart(2, '0')}</span><i style={{ background: classColors[p.class] }} /><span className="compact-identity"><b>{p.name}</b><small><RoleMark role={p.signup_role}/> 主修 {p.signup_spec} · {m.itemLevel}</small></span><span className="compact-public"><small>副修 {p.claimed_offspec || '无'}</small><em>{believableEconomy(p, m.itemLevel)}</em></span></div> })}</div>}<div className="public-note">悬停人物可查看完整公开介绍</div></aside></div></section>
+  return <section className="page recruit-page scene-page recruit-scene" style={sceneStyle(recruitBackgroundUrl)}><div className="page-heading"><div><div className="eyebrow">RECRUITMENT · ROUND {round + 1}</div><h2>选择一位勇士进团</h2><p>注意阵容的职责与职业搭配，合理的坦克、治疗和输出组合才能走得更远。</p></div><div className="round-dots" aria-label={`第${round + 1}轮`}>{Array.from({ length: 10 }, (_, i) => <i key={i} className={i < round ? 'done' : i === round ? 'active' : ''}>{i + 1}</i>)}</div></div><div className="recruit-layout"><div className="candidate-grid">{candidates.map((p) => <CandidateCard key={p.player_id} player={p} seed={seed} round={round} onChoose={() => onRecruit(p)} />)}</div><aside className="roster-panel"><div className="panel-title"><span>当前团队 · 公开信息</span><b>{team.length}<small>/10</small></b></div>{team.length === 0 ? <div className="empty-roster">名单还是空的。<br/>第一手最见团长功力。</div> : <div className="compact-roster">{team.map((m, i) => { const p = publicById.get(m.id)!; return <div className="compact-member person-hover" data-intro={publicIntro(p, m.itemLevel)} style={classStyle(p.class)} key={m.id}><span className="roster-no">{String(i + 1).padStart(2, '0')}</span><i style={{ background: classColors[p.class] }} /><span className="compact-identity"><b>{p.name}</b><small><RoleMark role={p.signup_role}/> 主修 {p.signup_spec} · {m.itemLevel}</small></span><span className="compact-public"><small>副修 {p.claimed_offspec || '无'}</small><em>{believableEconomy(p, m.itemLevel)}</em></span></div> })}</div>}<div className="public-note">悬停人物可查看完整公开介绍</div></aside></div></section>
 }
 
 function CandidateCard({ player: p, seed, round, onChoose }: { player: PublicPlayer; seed: string; round: number; onChoose: () => void }) {
@@ -247,18 +261,14 @@ function CombatPlayback({ boss, result, onComplete }: { boss: Boss; result: Comb
   const bossHp = Math.round(100 - (100 - targetHp) * Math.min(step / totalSteps, 1))
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
   const copyRng = rngFor(result.bossId, result.attempt, result.duration, 'combat-copy')
-  const openings = ['团长倒数到二就开了怪，坦克接住仇恨，治疗开始寻找今晚第一个血压来源。', '标记刚摆完Boss就被拉了过来，全团一边找位置一边假装早有准备。', '一句“这把认真点”之后正式开怪，所有人的保命技能突然显得格外醒目。', '坦克冲锋，治疗喝水被迫取消，输出们则一致表示自己绝对没提前动手。', '倒数结束，全团散开站位；至少从远处看，这次很像一个熟练团。', '团长确认了一遍打断顺序，随后Boss用第一轮技能检查大家到底听没听。']
-  const killTitles = [`${boss.boss_name} 倒下，拍卖师开始清嗓子`, `${boss.boss_name} 被击杀，全团瞬间恢复打字能力`, `${boss.boss_name} 交货，刚才装死的人开始研究掉落`, `${boss.boss_name} 击杀，修理费暂时停止上涨`, `${boss.boss_name} 含泪倒地，团队频道开始刷“出货”`]
-  const recoveredKillTitles = [`战复接上，${boss.boss_name} 最终还是倒了`, `带着减员收尾，${boss.boss_name} 交出掉落`, `${boss.boss_name} 被险险击杀，战复没有白交`]
-  const fatalWipeTitles = [`关键机制崩盘，Boss 还剩 ${result.remainingHp}%`, `连锁事故压垮团队，Boss 剩余 ${result.remainingHp}%`, `战斗当场失控，Boss 带着 ${result.remainingHp}% 血量继续值班`]
-  const attritionWipeTitles = [`减员拖垮后半程，Boss 还剩 ${result.remainingHp}%`, `剩余成员没能收尾，Boss 剩余 ${result.remainingHp}%`, `战复与减员都没能挽回这一把，Boss 还剩 ${result.remainingHp}%`]
-  const enrageWipeTitles = [`前面险情已处理，最终仍倒在狂暴前`, `战斗拖进极限阶段，Boss 还剩 ${result.remainingHp}%`, `最后阶段资源见底，Boss 剩余 ${result.remainingHp}%`]
-  const opening = openings[Math.floor(copyRng() * openings.length)]
   const hasFatalEvent = result.events.some((event) => event.status === '失败')
   const deaths = result.deaths ?? []
-  const wipeTitles = hasFatalEvent ? fatalWipeTitles : (result.casualties ?? 0) > 0 || deaths.length ? attritionWipeTitles : enrageWipeTitles
-  const finaleTitles = result.killed ? (deaths.length ? recoveredKillTitles : killTitles) : wipeTitles
-  const finale = finaleTitles[Math.floor(copyRng() * finaleTitles.length)]
+  const variables = { boss: boss.boss_name, hp: result.remainingHp }
+  const opening = combatCopy('opening', copyRng, variables)
+  const finaleCategory: CombatLogTemplate['category'] = result.killed
+    ? deaths.length ? 'kill_deaths' : 'kill'
+    : hasFatalEvent ? 'wipe_fatal' : (result.casualties ?? 0) > 0 || deaths.length ? 'wipe_attrition' : 'wipe_enrage'
+  const finale = combatCopy(finaleCategory, copyRng, variables)
   return <section className="page combat-page scene-page boss-scene" style={bossSceneStyle(boss)}><div className="combat-heading"><div><div className="eyebrow">LIVE COMBAT LOG · ATTEMPT {result.attempt}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · 重要事件实时记录</p></div><div className="boss-health"><span>Boss 血量</span><b>{bossHp}%</b><i><em style={{ width: `${bossHp}%` }} /></i></div></div><div className="combat-console"><div className="console-top"><span>战斗记录</span><small>{finished ? `战斗时长 ${formatTime(result.duration)}` : '战斗进行中…'}</small></div><div className="log-line opening visible"><time>0:00</time><i>◆</i><div><b>战斗开始</b><p>{opening}</p></div></div>{result.events.map((event, index) => { const visible = step > index; const time = result.duration * (event.timeRatio ?? (index + 1) / (result.events.length + 1)); return <div key={`${event.name}-${index}`} className={`log-line ${event.status} ${visible ? 'visible' : ''}`}><time>{formatTime(time)}</time><i>{event.status === '成功' ? '✓' : event.status === '险情' ? '!' : '×'}</i><div><b>{event.name}</b><p>{event.detail}{event.responsible ? ` · 责任人：${event.responsible}` : ''}{event.recovery ? <><br/><span className="event-recovery">补救：{event.recovery}</span></> : null}</p></div><em>{event.status}</em></div> })}{finished && <div className={`log-line finale visible ${result.killed ? '成功' : '失败'}`}><time>{formatTime(result.duration)}</time><i>{result.killed ? '✓' : '×'}</i><div><b>{finale}</b><p>{result.reason}</p></div><em>{result.killed ? '击杀' : '灭团'}</em></div>}</div>{finished ? <><FightStatsStrip result={result}/><CombatMeters meters={result.meters}/><div className="combat-actions"><span>{result.killed ? '战斗统计已记账，接下来看看谁愿意为紫色像素上头。' : '锅已经写进战斗记录，回去还能重新排职责。'}</span><button className="primary large" onClick={onComplete}>{result.killed ? '进入掉落拍卖' : '结算本次灭团'} <b>→</b></button></div></> : <div className="combat-progress"><span style={{ width: `${step / totalSteps * 100}%` }}/><button onClick={() => setStep(totalSteps)}>展开完整记录</button></div>}</section>
 }
 
@@ -295,7 +305,7 @@ function Auction({ boss, records, result, pot, morale, onNext, isLast }: { boss:
 }
 
 function Results({ game, onNew }: { game: GameState; onReplay?: () => void; onNew: () => void }) {
-  const eligible = game.team.filter((member) => !member.left)
+  const eligible = payoutEligible(game.team)
   const share = eligible.length ? Math.floor(game.pot / eligible.length) : 0
   const cleared = game.histories.filter((history) => history.killed).length
   const allFights = game.histories.flatMap((history) => history.results)
@@ -308,7 +318,7 @@ function Results({ game, onNew }: { game: GameState; onReplay?: () => void; onNe
   const carry = [...stats].sort((a, b) => b.contribution - a.contribution)[0]
   const warCriminal = [...game.team].filter((member) => member.id !== carry?.member.id && member.blame > 0).sort((a, b) => b.blame - a.blame)[0]
   const biggestBuyer = [...game.team].sort((a, b) => b.spent - a.spent)[0]
-  const biggestBone = [...game.team].sort((a, b) => (share - b.spent) - (share - a.spent))[0]
+  const biggestBone = [...eligible].sort((a, b) => (share - b.spent) - (share - a.spent))[0]
   const priciest = [...game.auctions].filter((record) => !record.salvaged).sort((a, b) => b.price - a.price)[0]
   const highestUnsold = [...game.auctions].filter((record) => record.salvaged).sort((a, b) => itemReferencePrice(b.item) - itemReferencePrice(a.item))[0]
   const overallMeters: CombatMeter[] = stats.map(({ member, averageDps, averageHps }) => {
@@ -316,40 +326,38 @@ function Results({ game, onNew }: { game: GameState; onReplay?: () => void; onNe
     const spec = currentSpec(member)
     return { playerId: member.id, name: player.name, spec: member.currentSpec, role: spec.role, itemLevel: member.itemLevel, dps: averageDps, hps: averageHps, damage: 0, healing: 0 }
   })
-  const reasonText = game.endReason === '全通MVP'
-    ? `奥杜尔 ${bosses.length} 个 Boss 全部击杀。`
-    : game.endReason === '成员退团散团'
-      ? `${publicById.get(game.lastCombat?.leaver ?? '')?.name ?? '有成员'}退团，团队当场解散。`
-      : `在${bosses[game.bossIndex]?.boss_name}连续三次失败，团队按规则结束。`
-  const finalCounts = roleCounts(game.team)
-  const wipeCount = allFights.filter((fight) => !fight.killed).length
-  const averageTeamDps = allFights.length ? Math.round(allFights.reduce((sum, fight) => sum + fight.teamDps, 0) / allFights.length) : 0
-  const structuralEnding = game.lastCombat?.responsible === '团长'
-  const reviewTitle = cleared === bosses.length
-    ? '这团真把奥杜尔打成了工资本'
-    : structuralEnding
-      ? '这不是某个人菜，是团长在配队界面先灭了一次'
-      : game.endReason === '成员退团散团'
-        ? 'Boss还没把团打散，人先把团散了'
-        : '纸面能打，执行和心态没熬到最后'
-  const evalText = cleared === bosses.length
-    ? `全程 ${allFights.length} 场战斗、${wipeCount} 次灭团，平均团队 DPS ${number(averageTeamDps)}。${wipeCount <= 3 ? '配置合理，关键位置也有人兜底，属于团长今晚可以在主城横着走的水平。' : '虽然过程修了不少装备，但阵容韧性足，最后还是把工资领全了。'}`
-    : structuralEnding
-      ? `最终停在${bosses[game.bossIndex]?.boss_name}：${game.lastCombat?.reason} 当前出战职责为 ${finalCounts.坦克}坦、${finalCounts.治疗}治疗、${finalCounts.近战DPS + finalCounts.远程DPS}输出。战斗数据救不了错误的岗位表，这轮主要责任归团长。`
-      : game.endReason === '成员退团散团'
-        ? `团队推进到${bosses[game.bossIndex]?.boss_name}，共打了 ${allFights.length} 场、灭了 ${wipeCount} 次。${game.lastCombat?.reason ?? '最后一次灭团'} 随后的退团让十人本当场变成九人观光团；选人除了看手法，也得看谁会在压力下拔网线。`
-        : `团队在${bosses[game.bossIndex]?.boss_name}三次尝试后止步，共经历 ${wipeCount} 次灭团，平均团队 DPS ${number(averageTeamDps)}。最终原因是“${game.lastCombat?.reason ?? '执行连续失误'}”；阵容没有明显硬伤，但机制执行、学习速度和心态没能同时过线。`
-  const disbandReport = game.endReason === '成员退团散团' && game.lastCombat ? (
-    <div className="disband-report">
-      <div className="disband-reason"><span>{game.lastCombat.leaveType ?? '成员退团'}</span><h3>{publicById.get(game.lastCombat.leaver ?? '')?.name ?? '一名成员'}退团导致散团</h3><p>{game.lastCombat.leaveReason ?? '成员在灭团后退出，团队人数不足，无法继续。'}</p></div>
-      <div className="disband-chat"><small>最后的团队频道</small>{game.lastCombat.chat.slice(-5).map((line, index) => <p key={`${line}-${index}`}>{line}</p>)}</div>
-    </div>
-  ) : null
+  const ending = resolveRunEnding({
+    seed: game.seed,
+    endReason: game.endReason,
+    currentBossId: bosses[game.bossIndex]?.boss_id ?? '',
+    histories: game.histories.map((history) => ({
+      bossId: history.bossId,
+      attempts: history.attempts,
+      killed: history.killed,
+      wipes: history.results.filter((fight) => !fight.killed).length,
+    })),
+    team: game.team.map((member) => ({
+      id: member.id,
+      name: publicById.get(member.id)?.name ?? member.id,
+      left: member.left,
+      blame: member.blame,
+      personality: hiddenById.get(member.id)?.personality_type ?? '',
+    })),
+    bosses: bosses.map((currentBoss) => ({ id: currentBoss.boss_id, name: currentBoss.boss_name, order: Number(currentBoss.order) })),
+    leaverId: game.lastCombat?.leaver,
+    leaveType: game.lastCombat?.leaveType,
+    leaveReason: game.lastCombat?.leaveReason,
+  })
+  const endingChat = ending.kind === 'leave' ? game.lastCombat?.chat.slice(-5) ?? [] : []
 
   return <section className="page results-page">
-    <div className="result-hero"><div><div className="eyebrow">RUN COMPLETE</div><h2>{game.endReason === '全通MVP' ? '奥杜尔全通' : '本局结束'}</h2><p>{reasonText}</p></div><div className="progress-ring" style={{ '--progress': `${cleared / bosses.length * 360}deg` } as React.CSSProperties}><div><b>{cleared}<small>/{bosses.length}</small></b><span>最终进度</span></div></div></div>
-    <div className={`run-review ${structuralEnding ? 'leader-fault' : ''}`}><div><small>本次团队战斗总评</small><h3>{reviewTitle}</h3><p>{evalText}</p></div><button className="primary" onClick={onNew}>重新开团 <span>→</span></button></div>
-    {disbandReport}
+    <div className="result-hero"><div><div className="eyebrow">RUN COMPLETE</div><h2>{ending.hidden ? '隐藏结局已解锁' : ending.kind === 'full-clear' ? '奥杜尔全通' : '本局结束'}</h2><p>{ending.label}</p></div><div className="progress-ring" style={{ '--progress': `${cleared / bosses.length * 360}deg` } as React.CSSProperties}><div><b>{cleared}<small>/{bosses.length}</small></b><span>最终进度</span></div></div></div>
+    <div className={`run-ending ending-${ending.kind} ${ending.hidden ? 'hidden-ending' : ''}`}>
+      <div className="ending-copy"><small>本次结局 · {ending.label}</small><h3>{ending.title}</h3><p>{ending.body}</p><strong>{ending.summary}</strong></div>
+      <button className="primary" onClick={onNew}>重新开团 <span>→</span></button>
+      {ending.reward && <div className="ending-reward"><span>隐藏奖励</span><b>{ending.reward.title}</b><p>{ending.reward.detail}</p></div>}
+      {endingChat.length > 0 && <div className="ending-chat"><small>最后的团队频道</small>{endingChat.map((line, index) => <p key={`${line}-${index}`}>{line}</p>)}</div>}
+    </div>
     <div className="money-summary"><div><small>总金池</small><b>{gold(game.pot)}</b></div><div><small>人均分金</small><b>{gold(share)}</b></div><div><small>总成交</small><b>{game.auctions.filter((record) => !record.salvaged).length} 件</b></div></div>
     <div className="result-columns">
       <div><SectionTitle kicker="BOSS RECORD" title="首领战绩"/><div className="boss-records">{bosses.map((currentBoss) => { const history = game.histories.find((item) => item.bossId === currentBoss.boss_id); const last = history?.results.at(-1); return <div key={currentBoss.boss_id}><span className={history?.killed ? 'cleared' : ''}>{history?.killed ? '✓' : '—'}</span><b>{currentBoss.boss_name}</b><small>{history ? `${history.attempts} 次 · ${last ? `${number(last.teamDps)} DPS` : ''}` : '未挑战'}</small><em>{history?.killed ? '已击杀' : history ? '未通过' : '未解锁'}</em></div> })}</div></div>
@@ -365,7 +373,7 @@ function Results({ game, onNew }: { game: GameState; onReplay?: () => void; onNe
 }
 
 function LegacyResults({ game, onReplay = () => undefined, onNew }: { game: GameState; onReplay?: () => void; onNew: () => void }) {
-  const eligible = game.team.filter((member) => !member.left)
+  const eligible = payoutEligible(game.team)
   const share = eligible.length ? Math.floor(game.pot / eligible.length) : 0
   const leaderIncome = game.pot - share * eligible.length
   const cleared = game.histories.filter((history) => history.killed).length
@@ -381,7 +389,7 @@ function LegacyResults({ game, onReplay = () => undefined, onNew }: { game: Game
   const biggestBuyer = [...game.team].sort((a, b) => b.spent - a.spent)[0]
   const warCriminal = [...game.team].sort((a, b) => b.blame - a.blame)[0]
   const carry = playerStats[0]
-  const biggestBone = [...game.team].sort((a, b) => (share - b.spent) - (share - a.spent))[0]
+  const biggestBone = [...eligible].sort((a, b) => (share - b.spent) - (share - a.spent))[0]
   const reasonText = game.endReason === '全通MVP' ? `奥杜尔 ${bosses.length} 个 Boss 全部击杀。` : game.endReason === '成员退团散团' ? `${publicById.get(game.lastCombat?.leaver ?? '')?.name ?? '有成员'}退团，团队当场解散。` : `在${bosses[game.bossIndex]?.boss_name}连续三次失败。`
   const evalText = cleared === bosses.length ? (game.team.reduce((sum, member) => sum + member.blame, 0) <= 4 ? '选人老辣：阵容扛住了完整路线，战斗数据和消费也都健康。' : '结果全通，但过程惊险；你选的人里藏了几颗雷。') : roleCounts(game.team).坦克 < 2 || roleCounts(game.team).治疗 < 2 ? '团长太相信奇迹，基础职责短板最终还是藏不住。' : '纸面阵容能开，抗压和执行力却没经住实战。'
   const disbandReport = game.endReason === '成员退团散团' && game.lastCombat ? <div className="disband-report"><div className="disband-reason"><span>{game.lastCombat.leaveType ?? '成员退团'}</span><h3>{publicById.get(game.lastCombat.leaver ?? '')?.name ?? '一名成员'}导致散团</h3><p>{game.lastCombat.leaveReason ?? '成员在灭团后退出，团队人数不足，无法继续。'}</p></div><div className="disband-chat"><small>最后的团队频道</small>{game.lastCombat.chat.slice(-5).map((line, index) => <p key={`${line}-${index}`}>{line}</p>)}</div></div> : null

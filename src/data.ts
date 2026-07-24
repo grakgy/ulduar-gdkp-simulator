@@ -5,6 +5,7 @@ import bossesRaw from '../Bosses.csv?raw'
 import eventsRaw from '../Boss_Events.csv?raw'
 import lootRaw from '../Loot_Pool.csv?raw'
 import chatTemplatesRaw from '../Chat_Templates.csv?raw'
+import combatLogTemplatesRaw from '../Combat_Log_Templates.csv?raw'
 
 export type Role = '坦克' | '治疗' | '近战DPS' | '远程DPS'
 
@@ -56,6 +57,11 @@ export interface HiddenPlayer {
 export interface ChatTemplate {
   scene: '报名' | '灭团' | '退团' | '拍卖'
   style_or_trait: string
+  template: string
+}
+
+export interface CombatLogTemplate {
+  category: 'opening' | 'kill' | 'kill_deaths' | 'wipe_fatal' | 'wipe_attrition' | 'wipe_enrage'
   template: string
 }
 
@@ -144,6 +150,7 @@ export const bosses = parseCsv<Boss>(bossesRaw).sort((a, b) => Number(a.order) -
 export const bossEvents = parseCsv<BossEvent>(eventsRaw)
 export const lootPool = parseCsv<LootItem>(lootRaw)
 export const chatTemplates = parseCsv<ChatTemplate>(chatTemplatesRaw)
+export const combatLogTemplates = parseCsv<CombatLogTemplate>(combatLogTemplatesRaw)
 
 export const publicById = new Map(fullPlayersPublic.map((p) => [p.player_id, p]))
 export const hiddenById = new Map(playersHidden.map((p) => [p.player_id, p]))
@@ -163,7 +170,7 @@ function poolHash(input: string): number {
   return hash >>> 0
 }
 
-export function playersForSeed(seed: string, poolSize = 40): PublicPlayer[] {
+export function playersForSeed(seed: string, poolSize = 50): PublicPlayer[] {
   const custom = fullPlayersPublic.filter((player) => hiddenById.get(player.player_id)?.source_type === '玩家自建')
   const random = fullPlayersPublic
     .filter((player) => hiddenById.get(player.player_id)?.source_type === '随机生成')
@@ -171,5 +178,5 @@ export function playersForSeed(seed: string, poolSize = 40): PublicPlayer[] {
   return [...custom, ...random.slice(0, Math.max(0, poolSize - custom.length))]
 }
 
-// 保留旧导出供脚本与外部调用使用；实际游戏会按本局 seed 生成自己的 40 人池。
+// 保留旧导出供脚本与外部调用使用；实际游戏会固定加入 40 名自建人物，再按本局 seed 补入 10 名随机人物。
 export const playersPublic = playersForSeed('380')

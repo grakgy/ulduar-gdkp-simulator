@@ -54,6 +54,7 @@ const newPublic = [
   { player_id: 'P099', name: '小鸽鸽', class: '牧师', signup_spec: '戒律牧', signup_role: '治疗', signup_item_level: '225', claimed_offspec: '暗牧', progress_display: '无链接', achievement_verified: '否', public_economy_claim: '有便宜就拿', whisper_pool: '小白听指挥|戒律牧 听安排|戒律牧 可切暗牧' },
   { player_id: 'P100', name: '阿茸', class: '猎人', signup_spec: '射击猎', signup_role: '远程DPS', signup_item_level: '220', claimed_offspec: '', progress_display: '全通经验（自述）', achievement_verified: '否', public_economy_claim: '毕业必拿', whisper_pool: '全通经验|射击猎 机制都会|射击猎 不犯低级错误' },
   { player_id: 'P101', name: '东星太子哥', class: '德鲁伊', signup_spec: '熊德', signup_role: '坦克', signup_item_level: '215', claimed_offspec: '奶德、猫德', progress_display: '无链接', achievement_verified: '否', public_economy_claim: '有便宜就拿', whisper_pool: '无敌大熊来咯|东星太子哥驾到|本大爷来咯' },
+  { player_id: 'P102', name: '柠檬七喜', class: '萨满', signup_spec: '奶萨', signup_role: '治疗', signup_item_level: '215', claimed_offspec: '', progress_display: '无链接', achievement_verified: '否', public_economy_claim: '有便宜就拿', whisper_pool: '奶萨求组|没麦能听指挥|治疗机制都懂' },
 ]
 
 for (const player of newPublic) {
@@ -93,17 +94,19 @@ const customDescriptions = {
   P092: ['顶级坦克、全Boss熟练、可指挥', '低水平团队中容易心灰意冷', '极低概率违规封号', '特殊事件退队', '毕业坦克兼指挥，强度极高，但钻规则漏洞存在特殊风险。'],
   P093: ['机制、生存、双修与团队性优秀', '不开麦导致突发报点慢', '沟通型事件小幅减益', '永不主动退队', '任劳任怨且稳定的双修牧师，主要短板是不主动开麦。'],
   P101: ['气氛活跃、偶有亮眼操作', '偶尔电脑卡不动了', '', '永不主动退队', '团队鼓舞者，喜欢变熊鼓舞士气。'],
+  P102: ['机制稳定、很少犯错、主动救场、帮助队友', '没有麦，突发情况不能及时沟通', '团队任务和救场小幅加成；主动报点事件小幅减益', '永不主动退队', '水平稳定的团队型奶萨，擅长处理机制和帮助队友；没有麦但能听指挥。'],
 }
 
 const newHidden = [
   { player_id: 'P094', combat_tier: '优秀', main_skill: '75', mechanics: '90', awareness: '92', stability: '90', teamwork: '96', learning: '84', mentality: '88', pressure_resistance: '90', social_primary: '调解者', social_secondary: '气氛组', base_leave_pct: '0', economy_type: '捡漏型', wallet_gold: '18000', reserve_gold: '6000', spend_willingness: '42', bid_aggression: '28', bargain_factor: '0.48', purchase_preference: '低价|合理提升', claim_honesty: '94', source_type: '玩家自建', personality_type: '调解型团队润滑剂', strength_tags: '机制稳定|团队润滑|观星者专精', weakness_tags: '输出上限不高|偶尔犯晕', special_rule: 'B14事件与输出额外加成；降低灭团士气损失', leave_policy: '永不主动退队', description: '认真专注、机制稳定，擅长缓和矛盾；在观察者奥尔加隆战斗中发挥非常好。' },
-  { player_id: 'P095', combat_tier: '顶级', main_skill: '95', mechanics: '98', awareness: '97', stability: '94', teamwork: '86', learning: '96', mentality: '68', pressure_resistance: '52', social_primary: '厌蠢症', social_secondary: '气氛组', base_leave_pct: '3', economy_type: '简陋型', wallet_gold: '20000', reserve_gold: '7000', spend_willingness: '34', bid_aggression: '30', bargain_factor: '0.5', purchase_preference: '低价|法系饰品', claim_honesty: '92', source_type: '玩家自建', personality_type: '高水平厌蠢型', strength_tags: '顶级机制|火法上限|活跃气氛', weakness_tags: '连续低级失误后心态爆炸|偶尔短路', special_rule: '高水平团队稳定加成；第二次低质量灭团后退队率上升', leave_policy: '条件退队', description: '装等低但水平极高，任何机制处理能力都很强；团队连续犯低级错误后会迅速失去耐心。' },
+  { player_id: 'P095', combat_tier: '顶级', main_skill: '90', mechanics: '98', awareness: '97', stability: '94', teamwork: '86', learning: '96', mentality: '68', pressure_resistance: '52', social_primary: '厌蠢症', social_secondary: '数据执着', base_leave_pct: '3', economy_type: '简陋型', wallet_gold: '20000', reserve_gold: '7000', spend_willingness: '34', bid_aggression: '30', bargain_factor: '0.5', purchase_preference: '低价|法系饰品', claim_honesty: '92', source_type: '玩家自建', personality_type: '高水平厌蠢型', strength_tags: '顶级机制|火法上限|数据复盘', weakness_tags: '连续低级失误后心态爆炸|偶尔短路', special_rule: '高水平团队稳定加成；第二次低质量灭团后退队率上升', leave_policy: '条件退队', description: '装等低但水平极高，任何机制处理能力都很强；团队连续犯低级错误后会迅速失去耐心。' },
   { player_id: 'P096', combat_tier: '中上', main_skill: '70', mechanics: '84', awareness: '86', stability: '86', teamwork: '96', learning: '80', mentality: '88', pressure_resistance: '90', social_primary: '气氛组', social_secondary: '责任型', base_leave_pct: '0', economy_type: '毕业装党', wallet_gold: '76000', reserve_gold: '20000', spend_willingness: '76', bid_aggression: '68', bargain_factor: '0.9', purchase_preference: 'S|S+|治疗极品', claim_honesty: '92', source_type: '玩家自建', personality_type: '团队型治疗', strength_tags: '鼓舞士气|稳定执行|愿意担责', weakness_tags: 'HPS上限一般|暗牧副修较弱', special_rule: '灭团士气损失降低', leave_policy: '永不主动退队', description: '团队型戒律牧，尽力不犯错并鼓舞士气，但治疗上限不算高。' },
   { player_id: 'P097', combat_tier: '优秀', main_skill: '80', mechanics: '68', awareness: '66', stability: '82', teamwork: '74', learning: '68', mentality: '92', pressure_resistance: '86', social_primary: '自信型', social_secondary: '宏依赖', base_leave_pct: '0', economy_type: '大老板', wallet_gold: '145000', reserve_gold: '26000', spend_willingness: '94', bid_aggression: '92', bargain_factor: '1.08', purchase_preference: '全部|武器|饰品', claim_honesty: '88', source_type: '玩家自建', personality_type: '自信型宏玩家', strength_tags: '木桩输出|刺杀节奏|消费强', weakness_tags: '移动战|复杂临场机制', special_rule: '低移动Boss输出提高；高移动Boss机制和输出下降', leave_policy: '永不主动退队', description: '依赖一键宏的刺杀贼，木桩表现很好，需要跑位与临场处理时明显拉跨。' },
   { player_id: 'P098', combat_tier: '中上', main_skill: '65', mechanics: '48', awareness: '52', stability: '58', teamwork: '70', learning: '90', mentality: '90', pressure_resistance: '72', social_primary: '小白型', social_secondary: '自信型', base_leave_pct: '0', economy_type: '小老板', wallet_gold: '70000', reserve_gold: '16000', spend_willingness: '84', bid_aggression: '78', bargain_factor: '0.92', purchase_preference: '全部|法系|治疗', claim_honesty: '74', source_type: '玩家自建', personality_type: '上头型小白', strength_tags: '学习快|点子多|消费积极', weakness_tags: '机制不熟|需要指导|容易自以为是', special_rule: '第二、第三次尝试学习收益较高', leave_policy: '永不主动退队', description: '对副本机制不熟但点子很多，容易上头；接受指导后会逐把进步。' },
   { player_id: 'P099', combat_tier: '中上', main_skill: '70', mechanics: '62', awareness: '70', stability: '76', teamwork: '94', learning: '94', mentality: '84', pressure_resistance: '86', social_primary: '小白型', social_secondary: '气氛组', base_leave_pct: '0', economy_type: '捡漏型', wallet_gold: '18000', reserve_gold: '5000', spend_willingness: '40', bid_aggression: '25', bargain_factor: '0.45', purchase_preference: '低价|合理提升', claim_honesty: '96', source_type: '玩家自建', personality_type: '听指挥型小白', strength_tags: '学习快|鼓舞士气|愿意执行', weakness_tags: '首把机制陌生|HPS一般|暗牧副修弱', special_rule: '低Boss经验时学习收益额外提高', leave_policy: '永不主动退队', description: '第一次不一定会，但听指挥、愿意学习；治疗上限一般，熟悉后稳定性明显提升。' },
   { player_id: 'P100', combat_tier: '中上', main_skill: '70', mechanics: '82', awareness: '82', stability: '84', teamwork: '96', learning: '82', mentality: '86', pressure_resistance: '88', social_primary: '气氛组', social_secondary: '责任型', base_leave_pct: '0', economy_type: '毕业装党', wallet_gold: '72000', reserve_gold: '18000', spend_willingness: '78', bid_aggression: '70', bargain_factor: '0.88', purchase_preference: 'S|S+|武器|饰品', claim_honesty: '92', source_type: '玩家自建', personality_type: '团队型输出', strength_tags: '鼓舞士气|机制稳定|团队执行', weakness_tags: 'DPS上限一般', special_rule: '灭团士气损失降低', leave_policy: '永不主动退队', description: '团队型猎人，尽力不犯错并能鼓舞士气，个人输出不算顶尖。' },
   { player_id: 'P101', combat_tier: '中上', main_skill: '75', mechanics: '65', awareness: '65', stability: '60', teamwork: '80', learning: '75', mentality: '75', pressure_resistance: '75', social_primary: '气氛组', social_secondary: '戏精型', base_leave_pct: '0', economy_type: '简陋型', wallet_gold: '20000', reserve_gold: '7000', spend_willingness: '60', bid_aggression: '50', bargain_factor: '0.48', purchase_preference: '低价|合理提升', claim_honesty: '85', source_type: '玩家自建', personality_type: '调解型团队润滑剂', strength_tags: '气氛活跃、偶有亮眼操作', weakness_tags: '偶尔电脑卡不动了', special_rule: '', leave_policy: '永不主动退队', description: '团队鼓舞者，喜欢变熊鼓舞士气' },
+  { player_id: 'P102', combat_tier: '优秀', main_skill: '85', mechanics: '92', awareness: '90', stability: '88', teamwork: '96', learning: '88', mentality: '90', pressure_resistance: '90', social_primary: '团队执行', social_secondary: '不开麦', base_leave_pct: '0', economy_type: '捡漏型', wallet_gold: '15000', reserve_gold: '5000', spend_willingness: '45', bid_aggression: '30', bargain_factor: '0.45', purchase_preference: '低价|治疗', claim_honesty: '95', source_type: '玩家自建', personality_type: '团队型治疗', strength_tags: '机制稳定|很少犯错|主动救场|帮助队友', weakness_tags: '没有麦|突发情况不能及时沟通', special_rule: '团队任务和救场小幅加成；主动报点事件小幅减益', leave_policy: '永不主动退队', description: '水平稳定的团队型奶萨，擅长处理机制和帮助队友；没有麦但能听指挥。' },
 ]
 
 const hiddenHeaders = ['player_id', 'combat_tier', 'main_skill', 'mechanics', 'awareness', 'stability', 'teamwork', 'learning', 'mentality', 'pressure_resistance', 'social_primary', 'social_secondary', 'base_leave_pct', 'economy_type', 'wallet_gold', 'reserve_gold', 'spend_willingness', 'bid_aggression', 'bargain_factor', 'purchase_preference', 'claim_honesty', 'source_type', 'personality_type', 'strength_tags', 'weakness_tags', 'special_rule', 'leave_policy', 'description']
@@ -116,12 +119,12 @@ const tidyHidden = hiddenPlayers.map((player) => {
   return {
     ...player,
     source_type: isCustom ? '玩家自建' : '随机生成',
-    personality_type: profile ? `${player.social_primary}${player.social_secondary && player.social_secondary !== '无' ? ` / ${player.social_secondary}` : ''}` : '随机组合型',
-    strength_tags: profile?.[0] ?? '由战斗数值与性格共同决定',
-    weakness_tags: profile?.[1] ?? '由低项数值与负面性格自然触发',
-    special_rule: profile?.[2] ?? '',
-    leave_policy: profile?.[3] ?? '按基础退队率与团队状态计算',
-    description: profile?.[4] ?? '随机生成角色；战斗、社交和消费互相独立，公开密语不代表隐藏真相。',
+    personality_type: profile ? `${player.social_primary}${player.social_secondary && player.social_secondary !== '无' ? ` / ${player.social_secondary}` : ''}` : player.personality_type || '随机组合型',
+    strength_tags: (profile?.[0] ?? player.strength_tags) || '由战斗数值与性格共同决定',
+    weakness_tags: (profile?.[1] ?? player.weakness_tags) || '由低项数值与负面性格自然触发',
+    special_rule: (profile?.[2] ?? player.special_rule) || '',
+    leave_policy: (profile?.[3] ?? player.leave_policy) || '按基础退队率与团队状态计算',
+    description: (profile?.[4] ?? player.description) || '随机生成角色；战斗、社交和消费互相独立，公开密语不代表隐藏真相。',
   }
 })
 
@@ -155,6 +158,7 @@ const newSpecs = [
   { player_id: 'P101', spec: '熊德', role: '坦克', character_item_level: '215', skill: '75', boss_experience: '35', willing_switch: '是', publicly_claimed: '是' },
   { player_id: 'P101', spec: '奶德', role: '治疗', character_item_level: '215', skill: '65', boss_experience: '35', willing_switch: '是', publicly_claimed: '是' },
   { player_id: 'P101', spec: '猫德', role: '近战DPS', character_item_level: '215', skill: '55', boss_experience: '35', willing_switch: '是', publicly_claimed: '是' },
+  { player_id: 'P102', spec: '奶萨', role: '治疗', character_item_level: '215', skill: '85', boss_experience: '80', willing_switch: '是', publicly_claimed: '是' },
 ]
 
 const obsoleteWeaponSpec = specs.findIndex((entry) => entry.player_id === 'P084' && entry.spec === '武器战')
@@ -167,6 +171,7 @@ for (const spec of newSpecs) {
 }
 
 const replacements = new Map([
+  ['P002', 'P102'],
   ['P010', 'P094'],
   ['P008', 'P095'],
   ['P018', 'P096'],

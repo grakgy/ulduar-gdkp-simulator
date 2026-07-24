@@ -40,9 +40,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 main { min-height: calc(100vh - 76px); }
 .page { width: min(1480px, 92vw); margin: 0 auto; padding: 58px 0 80px; }
 .scene-page { position: relative; isolation: isolate; }
-.scene-page::before { content: ''; position: absolute; inset: 18px -3vw 28px; z-index: -1; border: 1px solid #30332d; background-image: linear-gradient(180deg, rgba(7,9,8,.36), rgba(7,9,8,.82) 52%, #090a09 96%), linear-gradient(90deg, rgba(7,9,8,.56), transparent 48%, rgba(7,9,8,.62)), var(--scene-image); background-size: cover; background-position: center 24%; filter: blur(2.5px) saturate(.72); transform: scale(1.008); opacity: .72; pointer-events: none; }
-.recruit-scene::before { background-position: center 42%; opacity: .62; }
-.boss-scene::before { background-position: center 18%; }
+.scene-page::before { content: ''; position: absolute; inset: 18px -3vw 28px; z-index: -1; border: 1px solid #3a3d36; background-image: linear-gradient(180deg, rgba(7,9,8,.18), rgba(7,9,8,.56) 58%, rgba(9,10,9,.88) 98%), linear-gradient(90deg, rgba(7,9,8,.34), transparent 52%, rgba(7,9,8,.4)), var(--scene-image); background-size: cover; background-position: center 24%; filter: blur(1.2px) saturate(.9) brightness(1.1); transform: scale(1.005); opacity: .9; pointer-events: none; }
+.recruit-scene::before { background-position: center 42%; opacity: .86; }
+.boss-scene::before { background-position: center 18%; opacity: .92; }
 .eyebrow { color: var(--gold); font: 700 11px 'Roboto Condensed', sans-serif; letter-spacing: .22em; text-transform: uppercase; }
 .primary, .secondary { border: 1px solid var(--gold); padding: 12px 18px; font-weight: 700; transition: .18s ease; }
 .primary { color: #13130f; background: var(--gold); }
@@ -50,6 +50,12 @@ main { min-height: calc(100vh - 76px); }
 .secondary { color: var(--gold-light); background: transparent; }
 .secondary:hover { background: #2b2518; }
 .large { padding: 15px 23px; min-width: 195px; display: inline-flex; justify-content: space-between; align-items: center; gap: 20px; }
+
+.intro-image { width: 100%; min-height: 100vh; position: relative; overflow: hidden; background-color: #070b0e; background-position: center; background-repeat: no-repeat; background-size: 100% 100%; }
+.intro-start-hotspot, .intro-restart-hotspot { position: absolute; color: transparent; background: transparent; border: 1px solid transparent; border-radius: 4px; }
+.intro-start-hotspot { left: 6.1%; top: 71.4%; width: 23.8%; height: 10.8%; }
+.intro-restart-hotspot { right: 2.1%; top: 3.4%; width: 13.8%; height: 7.3%; }
+.intro-start-hotspot:hover, .intro-restart-hotspot:hover, .intro-start-hotspot:focus-visible, .intro-restart-hotspot:focus-visible { border-color: rgba(240,202,121,.8); box-shadow: 0 0 24px rgba(217,167,75,.28), inset 0 0 18px rgba(217,167,75,.1); }
 
 .intro { min-height: calc(100vh - 76px); padding-top: 12vh; position: relative; overflow: hidden; }
 .intro::before { content: 'ULDUAR'; position: absolute; right: -3vw; top: 1vh; color: transparent; -webkit-text-stroke: 1px rgba(217,167,75,.09); font: 900 21vw/.8 'Roboto Condensed', sans-serif; letter-spacing: -.06em; pointer-events: none; }
@@ -218,6 +224,21 @@ main { min-height: calc(100vh - 76px); }
 .run-review button { min-width: 145px; }
 .run-review.leader-fault { border-color: #74352e; background: linear-gradient(115deg, #28110f, #11130f 66%); }
 .run-review.leader-fault small { color: #df7669; }
+.run-ending { margin: -8px 0 28px; padding: 24px 26px; display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 24px 30px; border: 1px solid #5b4a27; background: linear-gradient(115deg, #211b0f, #11130f 62%); }
+.ending-copy small { color: var(--gold); font: 700 9px 'Roboto Condensed', sans-serif; letter-spacing: .16em; }
+.ending-copy h3 { margin: 7px 0 8px; color: #eee9dc; font-size: 24px; }
+.ending-copy p { max-width: 900px; margin: 0; color: #b9b09b; font-size: 12px; line-height: 1.85; }
+.ending-copy strong { display: block; max-width: 980px; margin-top: 13px; padding-top: 12px; border-top: 1px solid #39362c; color: #85877e; font-size: 10px; font-weight: 500; line-height: 1.75; }
+.run-ending > button { min-width: 145px; }
+.hidden-ending { border-color: #8770b7; background: radial-gradient(circle at 82% 18%, #59457b26, transparent 34%), linear-gradient(115deg, #21192f, #11130f 65%); box-shadow: inset 0 0 30px #7654aa12; }
+.hidden-ending .ending-copy small { color: #baa0e8; }
+.ending-reward { grid-column: 1 / -1; padding: 17px 19px; border: 1px solid #69548d; background: #21192b; }
+.ending-reward span { color: #a98bd7; font: 700 8px 'Roboto Condensed', sans-serif; letter-spacing: .16em; }
+.ending-reward b { display: block; margin: 5px 0; color: #e0d3f3; font-size: 14px; }
+.ending-reward p { margin: 0; color: #8f83a0; font-size: 9px; line-height: 1.65; }
+.ending-chat { grid-column: 1 / -1; padding: 14px 18px; border-left: 2px solid #795a2d; background: #0d0f0c; }
+.ending-chat small { color: #746b59; font-size: 8px; letter-spacing: .12em; }
+.ending-chat p { margin: 6px 0 0; color: #999183; font-size: 9px; }
 .disband-report { margin: 18px 0 28px; display: grid; grid-template-columns: 1fr 1.2fr; border: 1px solid #6a302b; background: linear-gradient(115deg, #23100e, #11120f 58%); }
 .disband-reason { padding: 20px 22px; border-right: 1px solid #462521; }
 .disband-reason > span { display: inline-flex; padding: 4px 8px; color: #e17c70; background: #321512; border: 1px solid #6a302b; font-size: 8px; letter-spacing: .08em; }
@@ -406,6 +427,8 @@ main { min-height: calc(100vh - 76px); }
 @media (max-width: 820px) {
   .run-review { grid-template-columns: 1fr; }
   .run-review button { width: 100%; }
+  .run-ending { grid-template-columns: 1fr; }
+  .run-ending > button { width: 100%; }
   .topbar { height: 62px; grid-template-columns: 1fr auto; padding: 0 4vw; }
   .stage-pill { display: none; }
   .brand b { font-size: 12px; }
@@ -466,6 +489,7 @@ main { min-height: calc(100vh - 76px); }
   .intro h1 { font-size: 43px; }
   .result-hero { align-items: flex-start; }
   .run-review { padding: 18px; }
+  .run-ending { padding: 18px; }
   .final-cards.loot-summary { grid-template-columns: 1fr; }
   .progress-ring { width: 96px; height: 96px; flex: 0 0 auto; }
   .progress-ring b { font-size: 26px; }

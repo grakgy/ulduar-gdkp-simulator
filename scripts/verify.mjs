@@ -10,6 +10,7 @@ try {
   const data = await server.ssrLoadModule('/src/data.ts')
   const engine = await server.ssrLoadModule('/src/engine.ts')
   const app = await server.ssrLoadModule('/src/App.tsx')
+  const endings = await server.ssrLoadModule('/src/endings.ts')
   const order = engine.shuffled(data.playersPublic, '380')
   const team = order.slice(0, 10).map((player) => engine.createMember(player.player_id, '380'))
   const combatA = engine.simulateCombat('380', data.bosses[0], 1, team, 70, 0)
@@ -93,23 +94,42 @@ try {
   const premiumReferenceRate = premiumSales.length ? premiumSales.filter((record) => record.price >= engine.itemReferencePrice(record.item)).length / premiumSales.length : 0
   const premiumPriceRatios = premiumSales.map((record) => record.price / engine.itemReferencePrice(record.item)).sort((a, b) => a - b)
   const premiumMedianRatio = premiumPriceRatios[Math.floor(premiumPriceRatios.length / 2)] ?? 0
+  const auctionAmount = (line) => {
+    if (line.startsWith('团长') || line.startsWith('成交') || !line.includes('：')) return undefined
+    const match = line.slice(line.indexOf('：') + 1).match(/[\d,]+/)
+    return match ? Number(match[0].replaceAll(',', '')) : undefined
+  }
   const strictlyIncreasingBids = sampledRecords.every((record) => {
-    const amounts = record.log.filter((line) => !line.startsWith('团长') && !line.startsWith('成交')).map((line) => line.match(/：([\d,]+)G/)?.[1]).filter(Boolean).map((value) => Number(value.replaceAll(',', '')))
+    const amounts = record.log.map(auctionAmount).filter((value) => value !== undefined)
     return amounts.every((amount, index) => index === 0 || amount > amounts[index - 1])
   })
   const noSelfBidding = sampledRecords.every((record) => {
-    const bidders = record.log.map((line) => line.match(/^(.+?)：([\d,]+)G$/)?.[1]).filter(Boolean)
+    const bidders = record.log.filter((line) => auctionAmount(line) !== undefined).map((line) => line.slice(0, line.indexOf('：')))
     return bidders.every((bidder, index) => index === 0 || bidder !== bidders[index - 1])
   })
-  const multiRoundAuctions = sampledSales.filter((record) => record.log.filter((line) => /：[\d,]+G/.test(line) && !line.startsWith('团长')).length >= 5).length
+  const multiRoundAuctions = sampledSales.filter((record) => record.log.filter((line) => auctionAmount(line) !== undefined).length >= 5).length
   const bidIncrements = new Set()
   for (const record of sampledSales.filter((record) => engine.itemStartPrice(record.item) >= 1000)) {
-    const amounts = record.log.filter((line) => !line.startsWith('团长') && !line.startsWith('成交')).map((line) => line.match(/：([\d,]+)G/)?.[1]).filter(Boolean).map((value) => Number(value.replaceAll(',', '')))
+    const amounts = record.log.map(auctionAmount).filter((value) => value !== undefined)
     amounts.slice(1).forEach((amount, index) => bidIncrements.add(amount - amounts[index]))
   }
   const noDiscounts = sampledRecords.every((record) => record.log.every((line) => !line.includes('降到') && !line.includes('半价')))
+  const fixedAuctionTemplates = data.chatTemplates.filter((entry) => entry.scene === '拍卖' && !entry.template.includes('{')).map((entry) => entry.template)
+  const auctionTemplatesUsed = sampledRecords.some((record) => record.log.some((line) => fixedAuctionTemplates.some((template) => line.endsWith(template))))
+  const dynamicMultiBidAuctions = sampledRecords.filter((record) => {
+    const bidders = new Set(record.log.filter((line) => auctionAmount(line) !== undefined).map((line) => line.slice(0, line.indexOf('：'))))
+    return bidders.size >= 3
+  }).length
+  const midAuctionExits = sampledRecords.filter((record) => (record.exitCount ?? 0) > 0).length
+  const lateAuctionJoins = sampledRecords.filter((record) => (record.lateJoiners?.length ?? 0) > 0).length
+  const numericBidLines = sampledRecords.flatMap((record) => record.log.filter((line) => auctionAmount(line) !== undefined))
+  const compactBidRate = numericBidLines.length
+    ? numericBidLines.filter((line) => /^[^：]+：[\d,]+$/.test(line)).length / numericBidLines.length
+    : 0
+  const noEmptyFollow = sampledRecords.every((record) => record.log.every((line) => !/我也跟|我也要/.test(line)))
+  const soldAuctionsCountDown = sampledSales.every((record) => record.log.at(-2) === '团长：5、4、3、2、1。' && record.log.at(-1)?.startsWith('成交：'))
 
-  const customPlayerIds = Array.from({ length: 21 }, (_, index) => `P${String(index + 81).padStart(3, '0')}`)
+  const customPlayerIds = Array.from({ length: 40 }, (_, index) => `P${String(index + 81).padStart(3, '0')}`)
   const customPlayersPreserved = customPlayerIds.every((id) => data.publicById.has(id))
   const newCustomPlayersActive = customPlayerIds.every((id) => data.playersPublic.some((player) => player.player_id === id))
   const combatProfileScore = (player) => ['main_skill', 'mechanics', 'awareness', 'stability', 'teamwork'].reduce((sum, key) => sum + Number(player[key] ?? 0), 0) / 5
@@ -119,11 +139,24 @@ try {
   const average = (values) => values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length)
   const customProfileAverage = average(customProfiles.map(combatProfileScore))
   const randomProfileAverage = average(randomProfiles.map(combatProfileScore))
-  const customPlayersStronger = customProfiles.length === 21 && customProfileAverage >= randomProfileAverage + 2
+  const customPlayersBalanced = customProfiles.length === 40
+    && customProfiles.some((player) => combatProfileScore(player) >= 90)
+    && customProfiles.some((player) => combatProfileScore(player) <= 35)
+    && customProfileAverage >= randomProfileAverage - 5
   const requiredHiddenFields = ['source_type', 'personality_type', 'strength_tags', 'weakness_tags', 'special_rule', 'leave_policy', 'description']
-  const hiddenSchemaOrganized = data.playersHidden.length === 101 && data.playersHidden.every((player) => requiredHiddenFields.every((field) => typeof player[field] === 'string') && player.source_type && player.personality_type && player.leave_policy && player.description)
+  const hiddenSchemaOrganized = data.playersHidden.length === 120 && data.playersHidden.every((player) => requiredHiddenFields.every((field) => typeof player[field] === 'string') && player.source_type && player.personality_type && player.leave_policy && player.description)
   const chatScenes = new Set(data.chatTemplates.map((entry) => entry.scene))
-  const chatTemplateCoverage = data.chatTemplates.length >= 220 && ['报名', '灭团', '退团', '拍卖'].every((scene) => chatScenes.has(scene)) && data.chatTemplates.every((entry) => entry.style_or_trait && entry.template && !entry.template.includes('�'))
+  const chatCounts = new Map()
+  data.chatTemplates.forEach((entry) => chatCounts.set(`${entry.scene}|${entry.style_or_trait}`, (chatCounts.get(`${entry.scene}|${entry.style_or_trait}`) ?? 0) + 1))
+  const customTraits = new Set(customProfiles.flatMap((player) => [player.social_primary, player.social_secondary]).filter((trait) => trait && trait !== '无'))
+  const customChatTraitsCovered = [...customTraits].every((trait) => (chatCounts.get(`灭团|${trait}`) ?? 0) > 0 && (chatCounts.get(`退团|${trait}`) ?? 0) > 0)
+  const chatTemplateRecommendedMinimumMet = [...chatCounts.values()].every((count) => count >= 15)
+  const chatTemplateCoverage = ['报名', '灭团', '退团', '拍卖'].every((scene) => chatScenes.has(scene)) && [...chatCounts.values()].every((count) => count > 0) && data.chatTemplates.every((entry) => entry.style_or_trait && entry.template && !entry.template.includes('�')) && customChatTraitsCovered
+  const combatLogCategories = new Map()
+  data.combatLogTemplates.forEach((entry) => combatLogCategories.set(entry.category, (combatLogCategories.get(entry.category) ?? 0) + 1))
+  const combatLogTemplatesValid = ['opening', 'kill', 'kill_deaths', 'wipe_fatal', 'wipe_attrition', 'wipe_enrage']
+    .every((category) => (combatLogCategories.get(category) ?? 0) >= 10)
+    && data.combatLogTemplates.every((entry) => entry.template && !entry.template.includes('�'))
   const learningPlayer = customProfiles.find((player) => player.player_id === 'P099')
   const learningSpec = data.specsByPlayer.get('P099')?.[0]
   const attemptTwoGain = engine.personalLearningGain(learningPlayer, learningSpec, 2)
@@ -198,17 +231,48 @@ try {
   const firstRound = engine.shuffled(data.playersPublic, 'pool-test|round:0|team:').slice(0, 5)
   const pickedId = firstRound[0].player_id
   const availableAfterPick = data.playersPublic.filter((player) => player.player_id !== pickedId)
-  const unpickedReturnToPool = availableAfterPick.length === 39 && firstRound.slice(1).every((player) => availableAfterPick.some((candidate) => candidate.player_id === player.player_id))
+  const unpickedReturnToPool = availableAfterPick.length === 49 && firstRound.slice(1).every((player) => availableAfterPick.some((candidate) => candidate.player_id === player.player_id))
   const poolA = data.playersForSeed('pool-a')
   const poolB = data.playersForSeed('pool-b')
   const customSet = new Set(customPlayerIds)
   const randomIdsA = poolA.filter((player) => !customSet.has(player.player_id)).map((player) => player.player_id)
   const randomIdsB = poolB.filter((player) => !customSet.has(player.player_id)).map((player) => player.player_id)
-  const dynamicPoolValid = poolA.length === 40 && poolB.length === 40
+  const dynamicPoolValid = poolA.length === 50 && poolB.length === 50
     && customPlayerIds.every((id) => poolA.some((player) => player.player_id === id) && poolB.some((player) => player.player_id === id))
+    && randomIdsA.length === 10 && randomIdsB.length === 10
     && randomIdsA.some((id) => !randomIdsB.includes(id))
   const princeSpecs = engine.publicSpecs('P101')
   const princeFullyPlayable = ['熊德', '奶德', '猫德'].every((spec) => princeSpecs.some((entry) => entry.spec === spec))
+  const lemonSpecs = engine.publicSpecs('P102')
+  const lemonFullyPlayable = data.publicById.get('P102')?.name === '柠檬七喜' && lemonSpecs.length === 1 && lemonSpecs[0].spec === '奶萨' && lemonSpecs[0].role === '治疗'
+  const customBatchBFullyPlayable = Array.from({ length: 18 }, (_, index) => `P${String(index + 103).padStart(3, '0')}`).every((id) => data.publicById.has(id) && data.hiddenById.has(id) && engine.publicSpecs(id).length >= 1)
+  const caiFamilyIds = ['P108', 'P115', 'P117']
+  const caiFamilyProfilesValid = caiFamilyIds.every((id) => data.hiddenById.get(id)?.special_rule.includes('互斥') && data.hiddenById.get(id)?.special_rule.includes('死亡'))
+  const expectedAtmosphereIds = ['P085', 'P087', 'P088', 'P094', 'P096', 'P098', 'P100', 'P101']
+  const atmosphereRosterValid = expectedAtmosphereIds.every((id) => engine.atmospherePlayerIds.has(id)) && engine.atmospherePlayerIds.size === expectedAtmosphereIds.length && !engine.atmospherePlayerIds.has('P095')
+
+  const endingBosses = data.bosses.map((boss) => ({ id: boss.boss_id, name: boss.boss_name, order: Number(boss.order) }))
+  const endingMember = (id, left = false, blame = 0) => ({ id, name: data.publicById.get(id)?.name ?? id, left, blame, personality: data.hiddenById.get(id)?.personality_type ?? '' })
+  const endingRun = (overrides = {}) => ({
+    seed: 'ending-test',
+    endReason: '',
+    currentBossId: 'B01',
+    histories: [],
+    team: [endingMember('P092'), endingMember('P102')],
+    bosses: endingBosses,
+    ...overrides,
+  })
+  const endingConfigComplete = data.bosses.every((boss) => endings.BOSS_FAILURE_ENDINGS[boss.boss_id]?.length >= 5 && endings.BOSS_FAILURE_ENDINGS[boss.boss_id].every((entry) => entry.title && entry.body))
+  const hiddenEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 1, killed: true, wipes: 0 }], team: [endingMember('P101'), endingMember('P102')] }))
+  const fullEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 1, killed: true, wipes: 0 }, { bossId: 'B14', attempts: 2, killed: true, wipes: 1 }] }))
+  const mainEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 2, killed: true, wipes: 1 }] }))
+  const leaveEnding = endings.resolveRunEnding(endingRun({ endReason: '成员退团散团', currentBossId: 'B09', leaverId: 'P102', leaveType: '战术下线', team: [endingMember('P092'), endingMember('P102', true)] }))
+  const collapseEnding = endings.resolveRunEnding(endingRun({ endReason: '成员退团散团', currentBossId: 'B09', leaverId: 'P096', leaveType: '分崩离析', team: [endingMember('P092'), endingMember('P096', true)] }))
+  const bossEnding = endings.resolveRunEnding(endingRun({ endReason: '三次失败', currentBossId: 'B11', histories: [{ bossId: 'B11', attempts: 3, killed: false, wipes: 3 }] }))
+  const fallbackEnding = endings.resolveRunEnding(endingRun())
+  const endingPriorityValid = hiddenEnding.priority === 100 && hiddenEnding.hidden && Boolean(hiddenEnding.reward) && fullEnding.priority === 90 && mainEnding.priority === 80 && leaveEnding.priority === 70 && collapseEnding.priority === 70 && collapseEnding.title === '分崩离析' && bossEnding.priority === 60 && fallbackEnding.priority === 10
+    && [hiddenEnding, fullEnding, mainEnding, leaveEnding, collapseEnding, bossEnding, fallbackEnding].every((ending) => ending.title && ending.body && ending.summary)
+  const payoutEligibilityValid = app.payoutEligible([engine.createMember('P092', 'payout'), { ...engine.createMember('P102', 'payout'), left: true }]).map((member) => member.id).join(',') === 'P092'
 
   const noRezIds = ['P092', 'P083', 'P082', 'P096', 'P084', 'P086', 'P095', 'P097', 'P100', 'P091']
   const rezIds = ['P092', 'P083', 'P082', 'P096', 'P081', 'P087', 'P088', 'P095', 'P097', 'P100']
@@ -261,6 +325,39 @@ try {
   }
   const firstWipeDisbandRate = firstAttemptWipes ? firstAttemptLeavers / firstAttemptWipes : 0
 
+  const glassTeamIds = ['P092', 'P101', 'P082', 'P096', 'P106', 'P081', 'P084', 'P093', 'P097', 'P086']
+  let glassResponsibleSamples = 0
+  let glassResponsibleSpoken = 0
+  let glassNonResponsibleLeaks = 0
+  let specialCollapseEligible = 0
+  let specialCollapseObserved = 0
+  const collapseTeamIds = ['P092', 'P101', 'P082', 'P096', 'P088', 'P100', 'P081', 'P095', 'P084', 'P097']
+  for (let sampleSeed = 1; sampleSeed <= 250; sampleSeed += 1) {
+    const glassTeam = glassTeamIds.map((id) => engine.createMember(id, `glass-${sampleSeed}`))
+    const collapseTeam = collapseTeamIds.map((id) => engine.createMember(id, `collapse-${sampleSeed}`))
+    for (const boss of data.bosses) {
+      const glassFight = engine.simulateCombat(`glass-${sampleSeed}`, boss, 1, glassTeam, 70, 0)
+      const glassSpoke = glassFight.chat.some((line) => line.startsWith('鹿乃乃乃乃：'))
+      if (glassFight.responsible === 'P106') {
+        glassResponsibleSamples += 1
+        if (glassSpoke) glassResponsibleSpoken += 1
+      } else if (glassSpoke) {
+        glassNonResponsibleLeaks += 1
+      }
+      const collapseFight = engine.simulateCombat(`collapse-${sampleSeed}`, boss, 1, collapseTeam, 70, 0)
+      if (!collapseFight.killed && ['P096', 'P100', 'P088'].includes(collapseFight.responsible)) {
+        specialCollapseEligible += 1
+        if (collapseFight.leaveType === '分崩离析') specialCollapseObserved += 1
+      }
+    }
+  }
+  const glassHeartChatValid = glassResponsibleSamples > 0 && glassResponsibleSpoken === glassResponsibleSamples && glassNonResponsibleLeaks === 0
+  const specialCollapseRate = specialCollapseEligible ? specialCollapseObserved / specialCollapseEligible : 0
+  const specialLeaveRatesValid = data.hiddenById.get('P089')?.base_leave_pct === '1'
+    && data.hiddenById.get('P089')?.leave_policy === '正常'
+    && ['P104', 'P105', 'P107', 'P108', 'P109', 'P110', 'P111', 'P112', 'P113', 'P114', 'P116', 'P117', 'P119']
+      .every((id) => data.hiddenById.get(id)?.base_leave_pct === '2')
+
   const result = {
     players: data.playersPublic.length,
     bosses: data.bosses.length,
@@ -289,14 +386,24 @@ try {
     strictlyIncreasingBids,
     noSelfBidding,
     noDiscounts,
+    auctionTemplatesUsed,
+    dynamicMultiBidAuctions,
+    midAuctionExits,
+    lateAuctionJoins,
+    compactBidRate: Number(compactBidRate.toFixed(3)),
+    noEmptyFollow,
+    soldAuctionsCountDown,
     customPlayersPreserved,
     newCustomPlayersActive,
     customProfileAverage: Number(customProfileAverage.toFixed(1)),
     randomProfileAverage: Number(randomProfileAverage.toFixed(1)),
-    customPlayersStronger,
+    customPlayersBalanced,
     hiddenSchemaOrganized,
     chatTemplates: data.chatTemplates.length,
     chatTemplateCoverage,
+    combatLogTemplatesValid,
+    customChatTraitsCovered,
+    chatTemplateRecommendedMinimumMet,
     attemptTwoGain: Number(attemptTwoGain.toFixed(2)),
     attemptThreeGain: Number(attemptThreeGain.toFixed(2)),
     attemptLearningWorks,
@@ -319,10 +426,25 @@ try {
     unpickedReturnToPool,
     dynamicPoolValid,
     princeFullyPlayable,
+    lemonFullyPlayable,
+    customBatchBFullyPlayable,
+    caiFamilyProfilesValid,
+    atmosphereRosterValid,
+    endingConfigComplete,
+    endingPriorityValid,
+    payoutEligibilityValid,
     permanentDeathCanKill,
     battleResAccountingWorks,
     tankDeathStopsCombat,
     firstWipeDisbandRate: Number(firstWipeDisbandRate.toFixed(3)),
+    glassResponsibleSamples,
+    glassResponsibleSpoken,
+    glassNonResponsibleLeaks,
+    glassHeartChatValid,
+    specialCollapseEligible,
+    specialCollapseObserved,
+    specialCollapseRate: Number(specialCollapseRate.toFixed(3)),
+    specialLeaveRatesValid,
     wipeChatVariants: wipeOpeners.size,
     recoveryCoverage: softEvents ? Number((recoveredSoftEvents / softEvents).toFixed(3)) : 1,
     namedRecoveryCoverage: softEvents ? Number((namedRecoveries / softEvents).toFixed(3)) : 1,
@@ -331,7 +453,7 @@ try {
     leaveNarrativeTypes: [...leaveNarrativeTypes],
   }
   console.log(JSON.stringify(result, null, 2))
-  if (result.players !== 40 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || result.priceTiers.join(',') !== '200,500,1000,2000' || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.structureFailuresAssignedToLeader || !result.healerSkillMatters || result.basePriceRate < .34 || result.basePriceRate > .48 || result.whaleRate > .12 || result.unsoldRate < .07 || result.unsoldRate > .14 || result.premiumReferenceRate < .42 || result.premiumMedianRatio < .9 || result.multiRoundAuctions < 10 || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersStronger || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.tankDeathStopsCombat || result.firstWipeDisbandRate > .12 || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.thirdAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
+  if (result.players !== 50 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || result.priceTiers.join(',') !== '200,500,1000,2000' || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.structureFailuresAssignedToLeader || !result.healerSkillMatters || result.basePriceRate < .2 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.tankDeathStopsCombat || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseObserved < 1 || result.specialCollapseRate < .05 || result.specialCollapseRate > .15 || !result.specialLeaveRatesValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.thirdAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
 } finally {
   await server.close()
 }

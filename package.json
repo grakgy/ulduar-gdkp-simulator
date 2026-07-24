@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "verify": "node scripts/verify.mjs",
-    "difficulty": "node scripts/difficulty.mjs"
+    "difficulty": "node scripts/difficulty.mjs",
+    "import:players-b": "node scripts/import_players_b.mjs",
+    "chat:coverage": "node scripts/chat_coverage.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
