@@ -1,4 +1,4 @@
-import { bossEvents, chatTemplates, hiddenById, lootPool, playerSpecs, publicById, specsByPlayer, type Boss, type HiddenPlayer, type LootItem, type PlayerSpec, type Role } from './data'
+import { bossEvents, chatTemplates, gameConfig, hiddenById, lootPool, playerSpecs, publicById, specsByPlayer, type Boss, type HiddenPlayer, type LootItem, type PlayerSpec, type Role } from './data'
 
 export interface TeamMember {
   id: string
@@ -151,6 +151,10 @@ export function roleCounts(team: TeamMember[]) {
 }
 
 function n(value: string | undefined) { return Number(value ?? 0) }
+function configNumber(key: string, fallback: number) {
+  const value = Number(gameConfig.get(key))
+  return Number.isFinite(value) ? value : fallback
+}
 function avg(values: number[]) { return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0 }
 function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)) }
 
@@ -364,23 +368,30 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const healingRequirement = ({ 低: 60, 中: 68, 高: 75, 极高: 82 } as const)[boss.healing_pressure]
   const healingCapacity = healerQuality + Math.max(0, healers.length - 2) * 10 - (healers.length === 1 ? 8 : 0)
   const healingShortfall = healingRequirement - healingCapacity
-  const tankIssue = boss.tank_mode === '载具' ? undefined
-    : counts.坦克 === 0
-      ? { reason: '一个坦克都没带，Boss第一轮点名后没人能站着接仇恨。', timing: .14 }
-      : boss.tank_mode === '双坦' && counts.坦克 < 2
-        ? { reason: `${boss.boss_name}明确需要双坦，团长只安排了1名坦克，换坦和副目标只能现场抽奖。`, timing: .3 }
-        : counts.坦克 >= 3
-          ? { reason: `全团塞了${counts.坦克}名坦克，输出位被挤没了；人是挺硬，Boss血条更硬。`, timing: .78 }
-          : undefined
-  const healingIssue = counts.治疗 === 0
-    ? { reason: '治疗位是空的，团血像手机电量一样肉眼可见地往下掉。', timing: .18 }
-    : healingShortfall >= 12
-      ? { reason: `${boss.boss_name}是${boss.healing_pressure}治疗压力，${counts.治疗}名治疗的平均实战水平只有${Math.round(healerQuality)}，人数看着够，奶量和救场都没跟上。`, timing: .42 }
-      : counts.治疗 >= 4
-        ? { reason: `带了${counts.治疗}名治疗，血条确实很安全，直到Boss狂暴把所有人一起送走。`, timing: .82 }
+  const minTanks = n(boss.min_tanks)
+  const maxTanks = n(boss.max_tanks)
+  const minHealers = n(boss.min_healers)
+  const maxHealers = n(boss.max_healers)
+  const minimumTankItemLevel = n(boss.min_tank_ilvl)
+  const tankGroupItemLevel = tanks.length ? Math.round(avg(tanks.map((member) => member.itemLevel))) : 0
+  const requiredDps = counts.坦克 > minTanks
+    ? Math.max(n(boss.min_dps), n(boss.extra_tank_min_dps))
+    : n(boss.min_dps)
+  const tankIssue = counts.坦克 < minTanks
+    ? { reason: `${boss.boss_name}至少需要${minTanks}名坦克，当前只有${counts.坦克}名，换坦或副目标无人承接。`, timing: .2 }
+    : counts.坦克 > maxTanks
+      ? { reason: `${boss.boss_name}最多适合${maxTanks}名坦克，当前塞了${counts.坦克}名，输出席位被严重挤占。`, timing: .78 }
+      : minimumTankItemLevel > 0 && tankGroupItemLevel < minimumTankItemLevel
+        ? { reason: `${boss.boss_name}要求坦克组平均至少${minimumTankItemLevel}装等，当前只有${tankGroupItemLevel}，第一轮重击就压穿了减伤。`, timing: .26 }
         : undefined
-  const structureIssue = tankIssue ?? healingIssue ?? (dps.length < 5
-    ? { reason: `只有${dps.length}名输出，机制都做对了，Boss还是靠血量拖进狂暴。`, timing: .84 }
+  const healingIssue = boss.tank_mode === '载具' ? undefined
+    : counts.治疗 < minHealers
+    ? { reason: `${boss.boss_name}至少需要${minHealers}名治疗，当前只有${counts.治疗}名，持续伤害没有足够人手覆盖。`, timing: .24 }
+    : counts.治疗 > maxHealers
+      ? { reason: `${boss.boss_name}最多容纳${maxHealers}名治疗，当前带了${counts.治疗}名，输出不足以在狂暴前结束战斗。`, timing: .82 }
+      : undefined
+  const structureIssue = tankIssue ?? healingIssue ?? (dps.length < requiredDps
+    ? { reason: `${boss.boss_name}当前配置至少需要${requiredDps}名输出，实际只有${dps.length}名，最终被血量拖进狂暴。`, timing: .84 }
     : undefined)
 
   let structurePenalty = 0
@@ -390,8 +401,8 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     else if (boss.tank_mode === '单坦' && counts.坦克 >= 2) structurePenalty -= (counts.坦克 - 1) * 4
     else if (counts.坦克 >= 3) structurePenalty -= (counts.坦克 - 2) * 14
   }
-  if (counts.治疗 === 0) structurePenalty -= 42
-  else {
+  if (boss.tank_mode !== '载具' && counts.治疗 === 0) structurePenalty -= 42
+  else if (boss.tank_mode !== '载具') {
     if (healingShortfall > 0) structurePenalty -= Math.min(27, healingShortfall * .75)
     if (counts.治疗 === 3 && ['低', '中'].includes(boss.healing_pressure)) structurePenalty -= 4
     if (counts.治疗 >= 4) structurePenalty -= 7 + (counts.治疗 - 4) * 6
@@ -406,18 +417,18 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const customProgressionBonus = allCustomRoster ? clamp(Math.max(0, 76 - baseSkill) * .36 * (n(boss.order) - 1), 0, 28) : 0
   const underdogBreakthrough = allCustomRoster
     && baseSkill < 70
-    && rngFor(seed, team.map((member) => member.id).join(','), 'underdog-run')() < .016
+    && rngFor(seed, team.map((member) => member.id).join(','), 'underdog-run')() < .032
   const underdogBonus = underdogBreakthrough ? 24 : 0
   const teamPower = baseSkill + ilvlBonus + attemptBonus + moraleBonus + structurePenalty + eliteCoordinationBonus + (hasCommander ? 1.5 : 0) + observerBonus + customCohesionBonus + customProgressionBonus + underdogBonus
-  const progressionRelief: Record<string, number> = { B04: 2, B05: 2, B07: 2, B08: 3, B09: 3, B10: 4, B11: 5, B12: 4, B13: 4, B14: 24 }
+  const progressionRelief: Record<string, number> = { B04: 2, B05: 2, B07: 2, B08: 3, B09: 3, B10: 4, B11: 5, B12: 4, B13: 6, B14: 28 }
   const bossDc = n(boss.base_dc) - (progressionRelief[boss.boss_id] ?? 0)
   const events = bossEvents.filter((e) => e.boss_id === boss.boss_id)
   const profile = encounterProfile(boss.boss_id)
   const results: EventResult[] = []
   const deaths: CombatDeath[] = []
   const permanentlyDead = new Set<string>()
-  const usedBattleRes = new Set<string>()
   const battleResSources = allData.filter(({ p }) => p.class === '德鲁伊' || p.class === '术士')
+  let battleResUsed = false
   const tolerance = deathTolerance(boss)
   let danger = Math.max(0, bossDc + 7 - teamPower)
   let severe = false
@@ -427,14 +438,14 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     const spec = currentSpec(target)
     const targetPublic = publicById.get(target.id)!
     let resurrectedBy: string | undefined
-    if (spec.role !== '坦克') {
-      if (targetPublic.class === '萨满' && !usedBattleRes.has(`self:${target.id}`)) {
-        usedBattleRes.add(`self:${target.id}`)
+    if (spec.role !== '坦克' && !battleResUsed) {
+      if (targetPublic.class === '萨满') {
+        battleResUsed = true
         resurrectedBy = targetPublic.name
       } else {
-        const source = battleResSources.find(({ m }) => m.id !== target.id && !permanentlyDead.has(m.id) && !usedBattleRes.has(m.id))
+        const source = battleResSources.find(({ m }) => m.id !== target.id && !permanentlyDead.has(m.id))
         if (source) {
-          usedBattleRes.add(source.m.id)
+          battleResUsed = true
           resurrectedBy = source.p.name
         }
       }
@@ -572,8 +583,10 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   }
 
   const killChance = clamp(58 + (teamPower - bossDc) * 2.7 - danger * 0.65 - permanentlyDead.size * 7 - (deaths.length - permanentlyDead.size) * 2, 2, 96)
-  const killed = !severe && rng() * 100 < killChance
-  const structuralFailure = !killed && Boolean(structureIssue)
+  const structureFailureTriggered = Boolean(structureIssue)
+    && rngFor(seed, boss.boss_id, attempt, team.map((member) => `${member.id}:${member.currentSpec}`).join(','), 'structure-gate')() * 100 < configNumber('invalid_composition_fail_pct', 85)
+  const killed = !severe && !structureFailureTriggered && rng() * 100 < killChance
+  const structuralFailure = !killed && structureFailureTriggered
   if (structuralFailure && structureIssue) {
     const failed = results.find((result) => result.status === '失败')
     const structuralEvent: EventResult = { name: '阵容结构崩盘', status: '失败', detail: structureIssue.reason, responsible: '团长', timeRatio: failed?.timeRatio ?? structureIssue.timing }
@@ -677,7 +690,11 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     return { bossId: boss.boss_id, attempt, killed, remainingHp: 0, events: results, reason, responsible: '', chat: [], moraleDelta, moraleReason, duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
   }
 
-  const baseMoraleLoss = -[8, 12, 12][attempt - 1]
+  const baseMoraleLoss = -[
+    configNumber('wipe_morale_loss_1', 10),
+    configNumber('wipe_morale_loss_2', 15),
+    configNumber('wipe_morale_loss_3', 15),
+  ][attempt - 1]
   const moraleDelta = baseMoraleLoss - (hasDbFriction ? 1 : 0)
   const chatRng = rngFor(seed, boss.boss_id, attempt, responsible, 'wipe-chat')
   let chat: string[]

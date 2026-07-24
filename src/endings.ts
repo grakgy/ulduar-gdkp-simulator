@@ -251,8 +251,8 @@ export function resolveRunEnding(run: EndingRunData): RunEnding {
   let hidden = false
   let reward: RunEnding['reward']
 
-  if (princeInFinalTeam && (clearedMain || clearedFull)) {
-    copy = failure('负重训练', '团队不仅打穿了奥杜尔主线，还把东星太子哥完整带到了终点。在额外的执行压力下，其他成员仍然维持住了输出、治疗和机制处理，隐藏结局“负重训练”正式解锁。')
+  if (princeInFinalTeam && clearedFull) {
+    copy = failure('负重训练', '团队不仅完成了十四场首领战，还把东星太子哥完整带到了观察者大厅的终点。在额外的执行压力下，其他成员仍然维持住了输出、治疗和机制处理，隐藏结局“负重训练”正式解锁。')
     priority = 100
     kind = 'hidden'
     label = '隐藏结局'

@@ -1,6 +1,6 @@
 ﻿key,value,description
 game_title,奥杜尔十人金团模拟器,静态前端MVP
-player_pool_size,40,每局固定加入全部玩家自建人物，再从随机生成人物中按seed补满40人
+player_pool_size,50,每局固定加入全部玩家自建人物，再从随机生成人物中按seed补满50人
 raid_size,10,玩家是团长/经理，不占战斗名额
 offer_min,3,每轮申请人数下限
 offer_max,5,每轮申请人数上限
@@ -8,14 +8,15 @@ max_recruit_rounds,18,未组满10人则本局招募失败
 max_invites_per_round,2,一轮最多邀请2人；未邀请者永久消失
 max_boss_attempts,3,每个Boss最多尝试3次
 initial_morale,70,团队初始士气
-wipe_morale_loss_1,8,第一次灭团
-wipe_morale_loss_2,12,第二次灭团
-wipe_morale_loss_3,16,第三次失败直接结束
-clean_kill_morale_gain,4,无人死亡击杀
+wipe_morale_loss_1,10,第一次灭团
+wipe_morale_loss_2,15,第二次灭团
+wipe_morale_loss_3,15,第三次失败直接结束
+clean_kill_morale_gain,3,无人死亡击杀
 messy_kill_morale_gain,1,有人死亡击杀
 min_tanks,2,开团硬要求
 min_healers,2,开团硬要求
 max_healers,3,三治疗提高容错但降低输出
+invalid_composition_fail_pct,85,职责人数或坦克装等不满足门槛时直接结构失败的概率%
 hard_mode_policy,固定H,有困难模式的Boss只模拟困难模式；其他Boss普通
 loot_per_boss,2,普通Boss抽2件普通；H Boss抽1普通+1困难；奥尔加隆抽2专属
 auction_increment_gold,500,标准加价

@@ -6,6 +6,7 @@ import eventsRaw from '../Boss_Events.csv?raw'
 import lootRaw from '../Loot_Pool.csv?raw'
 import chatTemplatesRaw from '../Chat_Templates.csv?raw'
 import combatLogTemplatesRaw from '../Combat_Log_Templates.csv?raw'
+import gameConfigRaw from '../Game_Config.csv?raw'
 
 export type Role = '坦克' | '治疗' | '近战DPS' | '远程DPS'
 
@@ -65,6 +66,12 @@ export interface CombatLogTemplate {
   template: string
 }
 
+interface GameConfigRow {
+  key: string
+  value: string
+  description: string
+}
+
 export interface PlayerSpec {
   player_id: string
   spec: string
@@ -87,6 +94,13 @@ export interface Boss {
   hard_mode: string
   tank_mode: '载具' | '双坦' | '单坦' | '弹性'
   healing_pressure: '低' | '中' | '高' | '极高'
+  min_tanks: string
+  max_tanks: string
+  min_healers: string
+  max_healers: string
+  min_dps: string
+  min_tank_ilvl: string
+  extra_tank_min_dps: string
   design_note: string
 }
 
@@ -151,6 +165,7 @@ export const bossEvents = parseCsv<BossEvent>(eventsRaw)
 export const lootPool = parseCsv<LootItem>(lootRaw)
 export const chatTemplates = parseCsv<ChatTemplate>(chatTemplatesRaw)
 export const combatLogTemplates = parseCsv<CombatLogTemplate>(combatLogTemplatesRaw)
+export const gameConfig = new Map(parseCsv<GameConfigRow>(gameConfigRaw).map((entry) => [entry.key, entry.value]))
 
 export const publicById = new Map(fullPlayersPublic.map((p) => [p.player_id, p]))
 export const hiddenById = new Map(playersHidden.map((p) => [p.player_id, p]))
@@ -170,7 +185,7 @@ function poolHash(input: string): number {
   return hash >>> 0
 }
 
-export function playersForSeed(seed: string, poolSize = 50): PublicPlayer[] {
+export function playersForSeed(seed: string, poolSize = Number(gameConfig.get('player_pool_size') ?? 50)): PublicPlayer[] {
   const custom = fullPlayersPublic.filter((player) => hiddenById.get(player.player_id)?.source_type === '玩家自建')
   const random = fullPlayersPublic
     .filter((player) => hiddenById.get(player.player_id)?.source_type === '随机生成')

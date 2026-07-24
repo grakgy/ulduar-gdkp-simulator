@@ -1,5 +1,5 @@
 {
-  "version": "0.7.0-combat-auction-social",
+  "version": "0.8.0-strict-roles-and-csv-config",
   "seed": 380,
   "player_count": 120,
   "active_pool_size": 50,

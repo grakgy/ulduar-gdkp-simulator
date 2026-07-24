@@ -37,22 +37,51 @@ try {
   ]
   const dualTankFailures = []
   const threeTankFailures = []
+  const dualTankResults = []
+  const threeTankResults = []
   let allowedSingleTankMisclassified = 0
   for (let sampleSeed = 1; sampleSeed <= 100; sampleSeed += 1) {
-    const oneTankTeam = makeStructureTeam(1).map((player) => engine.createMember(player.player_id, `structure-1-${sampleSeed}`))
-    const threeTankTeam = makeStructureTeam(3).map((player) => engine.createMember(player.player_id, `structure-3-${sampleSeed}`))
+    const oneTankTeam = makeStructureTeam(1).map((player) => ({ ...engine.createMember(player.player_id, `structure-1-${sampleSeed}`), itemLevel: 232 }))
+    const threeTankTeam = makeStructureTeam(3).map((player) => ({ ...engine.createMember(player.player_id, `structure-3-${sampleSeed}`), itemLevel: 232 }))
     const dualTankResult = engine.simulateCombat(`dual-${sampleSeed}`, data.bosses[4], 1, oneTankTeam, 70, 0)
     const singleTankResult = engine.simulateCombat(`single-${sampleSeed}`, data.bosses[7], 1, oneTankTeam, 70, 0)
     const flexibleTankResult = engine.simulateCombat(`flex-${sampleSeed}`, data.bosses[10], 1, oneTankTeam, 70, 0)
     const threeTankResult = engine.simulateCombat(`three-${sampleSeed}`, data.bosses[10], 1, threeTankTeam, 70, 0)
+    dualTankResults.push(dualTankResult)
+    threeTankResults.push(threeTankResult)
     if (!dualTankResult.killed) dualTankFailures.push(dualTankResult)
     if (!threeTankResult.killed) threeTankFailures.push(threeTankResult)
     for (const result of [singleTankResult, flexibleTankResult]) {
       if (!result.killed && result.events.some((event) => event.name === '阵容结构崩盘') && result.reason.includes('坦克')) allowedSingleTankMisclassified += 1
     }
   }
-  const structureSamples = [...dualTankFailures, ...threeTankFailures]
-  const structureFailuresAssignedToLeader = dualTankFailures.length > 30 && threeTankFailures.length > 30 && allowedSingleTankMisclassified === 0 && structureSamples.every((result) => result.responsible === '团长' && result.reason.includes('坦克') && result.events.some((event) => event.name === '阵容结构崩盘' && event.responsible === '团长'))
+  const structureSamples = [...dualTankResults, ...threeTankResults].filter((result) => result.events.some((event) => event.name === '阵容结构崩盘'))
+  const structureFailureRate = structureSamples.length / (dualTankResults.length + threeTankResults.length)
+  const structureFailuresAssignedToLeader = structureFailureRate >= .8 && structureFailureRate <= .9 && allowedSingleTankMisclassified === 0 && structureSamples.every((result) => result.responsible === '团长' && result.reason.includes('坦克') && result.events.some((event) => event.name === '阵容结构崩盘' && event.responsible === '团长'))
+  const tanksForComposition = data.playersPublic.filter((player) => player.signup_role === '坦克').slice(0, 2)
+  const healersForComposition = data.playersPublic.filter((player) => player.signup_role === '治疗').slice(0, 4)
+  const dpsForComposition = data.playersPublic.filter((player) => player.signup_role.includes('DPS')).slice(0, 8)
+  const compositionMember = (player, seed, itemLevel = 232) => ({ ...engine.createMember(player.player_id, seed), itemLevel })
+  const oneHealerTeam = [...tanksForComposition.slice(0, 1), ...healersForComposition.slice(0, 1), ...dpsForComposition.slice(0, 8)].map((player) => compositionMember(player, 'one-healer'))
+  const fourHealerTeam = [...tanksForComposition.slice(0, 1), ...healersForComposition, ...dpsForComposition.slice(0, 5)].map((player) => compositionMember(player, 'four-healer'))
+  const extraTankLowDpsTeam = [...tanksForComposition, ...healersForComposition.slice(0, 3), ...dpsForComposition.slice(0, 5)].map((player) => compositionMember(player, 'extra-tank-low-dps'))
+  const lowTankTeam = [
+    compositionMember(tanksForComposition[0], 'low-tank', 200),
+    ...healersForComposition.slice(0, 2).map((player) => compositionMember(player, 'low-tank')),
+    ...dpsForComposition.slice(0, 7).map((player) => compositionMember(player, 'low-tank')),
+  ]
+  const oneHealerResult = engine.simulateCombat('one-healer', data.bosses[3], 1, oneHealerTeam, 70, 0)
+  const fourHealerResult = engine.simulateCombat('four-healer', data.bosses[3], 1, fourHealerTeam, 70, 0)
+  const extraTankLowDpsResult = engine.simulateCombat('extra-tank-low-dps', data.bosses[3], 1, extraTankLowDpsTeam, 70, 0)
+  const lowTankResult = engine.simulateCombat('low-tank', data.bosses[11], 1, lowTankTeam, 70, 0)
+  const strictCompositionValid = [oneHealerResult, fourHealerResult, extraTankLowDpsResult, lowTankResult]
+    .every((result) => !result.killed && result.responsible === '团长' && result.events.some((event) => event.name === '阵容结构崩盘'))
+    && oneHealerResult.reason.includes('至少需要2名治疗')
+    && fourHealerResult.reason.includes('最多容纳3名治疗')
+    && extraTankLowDpsResult.reason.includes('至少需要6名输出')
+    && lowTankResult.reason.includes('至少220装等')
+  const wipeMoraleConfigValid = oneHealerResult.moraleDelta === -10
+    && engine.simulateCombat('one-healer', data.bosses[3], 2, oneHealerTeam, 60, 0).moraleDelta === -15
 
   const healerScore = (player) => {
     const hidden = data.hiddenById.get(player.player_id)
@@ -263,29 +292,33 @@ try {
     ...overrides,
   })
   const endingConfigComplete = data.bosses.every((boss) => endings.BOSS_FAILURE_ENDINGS[boss.boss_id]?.length >= 5 && endings.BOSS_FAILURE_ENDINGS[boss.boss_id].every((entry) => entry.title && entry.body))
-  const hiddenEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 1, killed: true, wipes: 0 }], team: [endingMember('P101'), endingMember('P102')] }))
+  const hiddenEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 1, killed: true, wipes: 0 }, { bossId: 'B14', attempts: 2, killed: true, wipes: 1 }], team: [endingMember('P101'), endingMember('P102')] }))
+  const princeFailedObserverEnding = endings.resolveRunEnding(endingRun({ endReason: '三次失败', currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 1, killed: true, wipes: 0 }, { bossId: 'B14', attempts: 3, killed: false, wipes: 3 }], team: [endingMember('P101'), endingMember('P102')] }))
   const fullEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 1, killed: true, wipes: 0 }, { bossId: 'B14', attempts: 2, killed: true, wipes: 1 }] }))
   const mainEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 2, killed: true, wipes: 1 }] }))
   const leaveEnding = endings.resolveRunEnding(endingRun({ endReason: '成员退团散团', currentBossId: 'B09', leaverId: 'P102', leaveType: '战术下线', team: [endingMember('P092'), endingMember('P102', true)] }))
   const collapseEnding = endings.resolveRunEnding(endingRun({ endReason: '成员退团散团', currentBossId: 'B09', leaverId: 'P096', leaveType: '分崩离析', team: [endingMember('P092'), endingMember('P096', true)] }))
   const bossEnding = endings.resolveRunEnding(endingRun({ endReason: '三次失败', currentBossId: 'B11', histories: [{ bossId: 'B11', attempts: 3, killed: false, wipes: 3 }] }))
   const fallbackEnding = endings.resolveRunEnding(endingRun())
-  const endingPriorityValid = hiddenEnding.priority === 100 && hiddenEnding.hidden && Boolean(hiddenEnding.reward) && fullEnding.priority === 90 && mainEnding.priority === 80 && leaveEnding.priority === 70 && collapseEnding.priority === 70 && collapseEnding.title === '分崩离析' && bossEnding.priority === 60 && fallbackEnding.priority === 10
-    && [hiddenEnding, fullEnding, mainEnding, leaveEnding, collapseEnding, bossEnding, fallbackEnding].every((ending) => ending.title && ending.body && ending.summary)
+  const endingPriorityValid = hiddenEnding.priority === 100 && hiddenEnding.hidden && Boolean(hiddenEnding.reward) && princeFailedObserverEnding.priority === 80 && !princeFailedObserverEnding.hidden && fullEnding.priority === 90 && mainEnding.priority === 80 && leaveEnding.priority === 70 && collapseEnding.priority === 70 && collapseEnding.title === '分崩离析' && bossEnding.priority === 60 && fallbackEnding.priority === 10
+    && [hiddenEnding, princeFailedObserverEnding, fullEnding, mainEnding, leaveEnding, collapseEnding, bossEnding, fallbackEnding].every((ending) => ending.title && ending.body && ending.summary)
   const payoutEligibilityValid = app.payoutEligible([engine.createMember('P092', 'payout'), { ...engine.createMember('P102', 'payout'), left: true }]).map((member) => member.id).join(',') === 'P092'
 
   const noRezIds = ['P092', 'P083', 'P082', 'P096', 'P084', 'P086', 'P095', 'P097', 'P100', 'P091']
   const rezIds = ['P092', 'P083', 'P082', 'P096', 'P081', 'P087', 'P088', 'P095', 'P097', 'P100']
   let permanentDeathCanKill = false
   let battleResAccountingWorks = false
+  let battleResLimitedToOne = true
   let tankDeathStopsCombat = false
-  for (let sampleSeed = 1; sampleSeed <= 600 && (!permanentDeathCanKill || !battleResAccountingWorks || !tankDeathStopsCombat); sampleSeed += 1) {
+  for (let sampleSeed = 1; sampleSeed <= 600; sampleSeed += 1) {
     const noRezTeam = noRezIds.map((id) => engine.createMember(id, `death-${sampleSeed}`))
     const rezTeam = rezIds.map((id) => engine.createMember(id, `rez-${sampleSeed}`))
     for (const boss of data.bosses.slice(1, 8)) {
       const noRezFight = engine.simulateCombat(`death-${sampleSeed}`, boss, 1, noRezTeam, 70, 0)
+      if (noRezFight.battleReses > 1) battleResLimitedToOne = false
       if (noRezFight.killed && noRezFight.casualties > 0 && noRezFight.meters.some((meter) => meter.died && meter.activeRatio < 1)) permanentDeathCanKill = true
       const rezFight = engine.simulateCombat(`rez-${sampleSeed}`, boss, 1, rezTeam, 70, 0)
+      if (rezFight.battleReses > 1) battleResLimitedToOne = false
       if (rezFight.battleReses > 0 && rezFight.meters.some((meter) => meter.battleResurrected && meter.activeRatio < 1)) battleResAccountingWorks = true
       for (const fight of [noRezFight, rezFight]) {
         if (fight.deaths.some((death) => death.role === '坦克') && !fight.killed) tankDeathStopsCombat = true
@@ -371,7 +404,10 @@ try {
     fullLootCoverage,
     firstAttemptKills,
     structureFailuresAssignedToLeader,
+    structureFailureRate: Number(structureFailureRate.toFixed(3)),
     allowedSingleTankMisclassified,
+    strictCompositionValid,
+    wipeMoraleConfigValid,
     strongHealerKills,
     weakHealerKills,
     healerSkillMatters,
@@ -435,6 +471,7 @@ try {
     payoutEligibilityValid,
     permanentDeathCanKill,
     battleResAccountingWorks,
+    battleResLimitedToOne,
     tankDeathStopsCombat,
     firstWipeDisbandRate: Number(firstWipeDisbandRate.toFixed(3)),
     glassResponsibleSamples,
@@ -453,7 +490,7 @@ try {
     leaveNarrativeTypes: [...leaveNarrativeTypes],
   }
   console.log(JSON.stringify(result, null, 2))
-  if (result.players !== 50 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || result.priceTiers.join(',') !== '200,500,1000,2000' || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.structureFailuresAssignedToLeader || !result.healerSkillMatters || result.basePriceRate < .2 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.tankDeathStopsCombat || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseObserved < 1 || result.specialCollapseRate < .05 || result.specialCollapseRate > .15 || !result.specialLeaveRatesValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.thirdAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
+  if (result.players !== 50 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || result.priceTiers.join(',') !== '200,500,1000,2000' || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.structureFailuresAssignedToLeader || !result.strictCompositionValid || !result.wipeMoraleConfigValid || !result.healerSkillMatters || result.basePriceRate < .2 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.battleResLimitedToOne || !result.tankDeathStopsCombat || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseObserved < 1 || result.specialCollapseRate < .05 || result.specialCollapseRate > .15 || !result.specialLeaveRatesValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.thirdAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
 } finally {
   await server.close()
 }
