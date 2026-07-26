@@ -1,0 +1,10 @@
+buff_id,buff_name,provider_class,provider_spec,power_bonus,icon_file,description
+battle_shout,战斗怒吼,战士,,0.25,ability_warrior_battleshout.png,提高物理职业的稳定输出
+arcane_brilliance,奥术光辉,法师,,0.20,Arcane Intellect.png,提高法系输出与治疗续航
+blessing_of_kings,王者祝福,圣骑士,,0.30,Blessing of Kings.png,小幅提高全团综合属性
+bloodlust,嗜血/英勇,萨满,,0.45,Bloodlust.png,提高关键阶段爆发能力
+demonic_pact,恶魔契约,术士,恶魔术,0.30,Demonic Pact.png,提高法系输出与治疗强度
+horn_of_winter,寒冬号角,死亡骑士,,0.25,Horn of Winter.png,提高近战和坦克表现
+gift_of_the_wild,野性赐福,德鲁伊,,0.25,Mark of the Wild.png,提高全团生存与稳定性
+moonkin_form,枭兽形态,德鲁伊,鸟德,0.25,Moonkin Form.png,提高法术输出协同
+prayer_of_fortitude,坚韧祷言,牧师,,0.25,Power Word Fortitude.png,提高全团血量与容错

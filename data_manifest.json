@@ -1,5 +1,5 @@
 {
-  "version": "0.8.0-strict-roles-and-csv-config",
+  "version": "0.9.0-replacement-and-raid-buffs",
   "seed": 380,
   "player_count": 120,
   "active_pool_size": 50,
@@ -34,6 +34,7 @@
     "Player_Specs.csv",
     "Players_Hidden.csv",
     "Players_Public.csv",
+    "Raid_Buffs.csv",
     "Social_Traits.csv",
     "Specs.csv"
   ],

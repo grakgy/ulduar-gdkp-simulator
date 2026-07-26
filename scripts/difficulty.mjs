@@ -5,6 +5,7 @@ const server = await createServer({ server: { middlewareMode: true }, appType: '
 try {
   const data = await server.ssrLoadModule('/src/data.ts')
   const engine = await server.ssrLoadModule('/src/engine.ts')
+  const replacement = await server.ssrLoadModule('/src/replacement.ts')
 
   const recruitLikePlayer = (seed) => {
     const pool = data.playersForSeed(seed)
@@ -58,15 +59,47 @@ try {
     let morale = 70
     let pot = 0
     let cleared = 0
+    let leaveCount = 0
+    const activeTeam = () => team.filter((member) => !member.left)
+    const mergeActive = (updated) => {
+      const byId = new Map(updated.map((member) => [member.id, member]))
+      team = team.map((member) => member.left ? member : byId.get(member.id) ?? member)
+    }
+    const chooseReplacement = (candidateIds) => {
+      const active = activeTeam()
+      const counts = engine.roleCounts(active)
+      return candidateIds
+        .map((id) => data.publicById.get(id))
+        .filter(Boolean)
+        .sort((a, b) => {
+          const score = (player) => {
+            let value = Number(player.signup_item_level)
+            if (player.signup_role === '坦克') value += counts.坦克 < 2 ? 80 : -35
+            else if (player.signup_role === '治疗') value += counts.治疗 < 2 ? 70 : counts.治疗 >= 3 ? -30 : 5
+            else value += counts.坦克 >= 2 && counts.治疗 >= 2 ? 30 : 0
+            return value
+          }
+          return score(b) - score(a)
+        })[0]
+    }
     for (const boss of data.bosses) {
       let killed = false
       for (let attempt = 1; attempt <= 3; attempt += 1) {
-        const result = engine.simulateCombat(seed, boss, attempt, team, morale, pot)
+        const result = engine.simulateCombat(seed, boss, attempt, activeTeam(), morale, pot)
         morale = Math.max(0, Math.min(100, morale + result.moraleDelta))
-        if (result.leaver) return { cleared, end: '退团', boss: boss.boss_name }
+        if (result.leaver) {
+          team = team.map((member) => member.id === result.leaver ? { ...member, left: true } : member)
+          if (result.leaveType === '分崩离析') return { cleared, end: '分崩离析', boss: boss.boss_name }
+          leaveCount += 1
+          const decision = replacement.replacementDecision(seed, boss.boss_id, attempt, leaveCount, result.leaver, team, result.killed ? 'auction' : 'prep')
+          if (!decision.plan) return { cleared, end: decision.endReason ?? '组不到人', boss: boss.boss_name }
+          const picked = chooseReplacement(decision.plan.candidateIds)
+          if (!picked) return { cleared, end: '组不到人', boss: boss.boss_name }
+          team.push(engine.createMember(picked.player_id, seed))
+        }
         if (!result.killed) continue
-        const auction = engine.runAuction(seed, boss, team)
-        team = auction.team
+        const auction = engine.runAuction(seed, boss, activeTeam())
+        mergeActive(auction.team)
         pot += auction.potGain
         morale = Math.max(0, Math.min(100, morale + auction.moraleDelta))
         cleared += 1
@@ -88,7 +121,7 @@ try {
       fullClearRate: Number((results.filter((result) => result.cleared === data.bosses.length).length / runs).toFixed(3)),
       reachedAlgalonRate: Number((results.filter((result) => result.cleared >= data.bosses.length - 1).length / runs).toFixed(3)),
       averageProgress: Number((results.reduce((sum, result) => sum + result.cleared, 0) / runs).toFixed(2)),
-      endedByLeaveRate: Number((results.filter((result) => result.end === '退团').length / runs).toFixed(3)),
+      endedByLeaveRate: Number((results.filter((result) => ['分崩离析', '组不到人', '臭名昭著'].includes(result.end)).length / runs).toFixed(3)),
       commonStops: [...stops.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
     }
   }
@@ -104,9 +137,9 @@ try {
   const strong = result.strongCustomTeam
   const normal = result.normalCustomTeam
   const weak = result.weakCustomTeam
-  if (strong.fullClearRate < .27 || strong.fullClearRate > .33) process.exitCode = 1
+  if (strong.fullClearRate < .22 || strong.fullClearRate > .28) process.exitCode = 1
   if (normal.fullClearRate < .08 || normal.fullClearRate > .12) process.exitCode = 1
-  if (weak.fullClearRate < .005 || weak.fullClearRate > .015) process.exitCode = 1
+  if (weak.fullClearRate < .015 || weak.fullClearRate > .025) process.exitCode = 1
 } finally {
   await server.close()
 }

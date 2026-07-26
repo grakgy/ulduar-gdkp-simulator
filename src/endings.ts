@@ -1,4 +1,4 @@
-export type EndingKind = 'hidden' | 'full-clear' | 'main-clear' | 'leave' | 'boss-failure' | 'fallback'
+export type EndingKind = 'hidden' | 'full-clear' | 'main-clear' | 'leave' | 'replacement-failure' | 'boss-failure' | 'fallback'
 
 export interface EndingHistory {
   bossId: string
@@ -271,6 +271,22 @@ export function resolveRunEnding(run: EndingRunData): RunEnding {
     priority = 80
     kind = 'main-clear'
     label = '主线通关结局'
+  } else if (run.endReason === '臭名昭著') {
+    copy = {
+      title: '臭名昭著',
+      body: `${run.leaveReason ?? '本局已经连续三次有人离队。'} 两条人脉都已经问遍，江湖上传言进此团等于坐牢，再也没人愿意接手这个进度。`,
+    }
+    priority = 70
+    kind = 'replacement-failure'
+    label = '特殊补人结局'
+  } else if (run.endReason === '组不到人') {
+    copy = {
+      title: '组不到人',
+      body: run.leaveReason ?? '成员离开后，团内有人尝试寻找替补，但没有找到愿意接进度的人。人数不足，远征只能就此结束。',
+    }
+    priority = 70
+    kind = 'replacement-failure'
+    label = '补人失败结局'
   } else if (run.endReason === '成员退团散团' || run.leaverId) {
     copy = leaveEnding(run)
     priority = 70

@@ -7,6 +7,7 @@ import lootRaw from '../Loot_Pool.csv?raw'
 import chatTemplatesRaw from '../Chat_Templates.csv?raw'
 import combatLogTemplatesRaw from '../Combat_Log_Templates.csv?raw'
 import gameConfigRaw from '../Game_Config.csv?raw'
+import raidBuffsRaw from '../Raid_Buffs.csv?raw'
 
 export type Role = '坦克' | '治疗' | '近战DPS' | '远程DPS'
 
@@ -64,6 +65,16 @@ export interface ChatTemplate {
 export interface CombatLogTemplate {
   category: 'opening' | 'kill' | 'kill_deaths' | 'wipe_fatal' | 'wipe_attrition' | 'wipe_enrage'
   template: string
+}
+
+export interface RaidBuff {
+  buff_id: string
+  buff_name: string
+  provider_class: string
+  provider_spec: string
+  power_bonus: string
+  icon_file: string
+  description: string
 }
 
 interface GameConfigRow {
@@ -166,6 +177,7 @@ export const lootPool = parseCsv<LootItem>(lootRaw)
 export const chatTemplates = parseCsv<ChatTemplate>(chatTemplatesRaw)
 export const combatLogTemplates = parseCsv<CombatLogTemplate>(combatLogTemplatesRaw)
 export const gameConfig = new Map(parseCsv<GameConfigRow>(gameConfigRaw).map((entry) => [entry.key, entry.value]))
+export const raidBuffs = parseCsv<RaidBuff>(raidBuffsRaw)
 
 export const publicById = new Map(fullPlayersPublic.map((p) => [p.player_id, p]))
 export const hiddenById = new Map(playersHidden.map((p) => [p.player_id, p]))

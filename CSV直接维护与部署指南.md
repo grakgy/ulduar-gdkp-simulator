@@ -37,6 +37,7 @@
 ## 掉落与全局配置
 
 - `Loot_Pool.csv`：装备名称、Boss、品质、适用职业、权重和参考价格。
+- `Raid_Buffs.csv`：职业/专精提供的团队 Buff、图标文件、战斗加成和说明。图标放在 `photo/buff/`，`icon_file` 必须与文件名完全一致。
 - `Game_Config.csv`：目前已直接接入的键包括：
   - `player_pool_size`
   - `initial_morale`
@@ -44,8 +45,30 @@
   - `wipe_morale_loss_2`
   - `wipe_morale_loss_3`
   - `invalid_composition_fail_pct`（阵容门槛不满足时直接结构失败的概率，当前为 85）
+  - `high_pot_leave_reduction`
+  - `replacement_success_pct_1`
+  - `replacement_success_pct_2`
+  - `special_collapse_leave_pct`
+  - `internet_cafe_leave_pct`
+  - `special_wipe_event_pct`
+  - `incidental_death_multiplier`
+  - `low_morale_power_penalty_55`
+  - `low_morale_power_penalty_40`
+  - `low_morale_power_penalty_25`
+  - `raid_buff_power_cap`
 
 `Game_Config.csv` 中其他历史键暂时仍主要用于说明，不能保证只改 CSV 就会影响运行逻辑。
+
+## 退团与补人
+
+- 自建人物 A 批为 `P081`–`P102`，引荐人是 `P092`、`P082`、`P120`。
+- 自建人物 B 批为 `P103`–`P120`，引荐人是 `P083`、`P088`、`P091`、`P100`、`P096`、`P097`。
+- 第一次、第二次补人的单渠道成功率分别读取 `replacement_success_pct_1` 和 `replacement_success_pct_2`；A、B 两条渠道同时存在时各自独立判定。
+- 第三次退团不再补人；两条渠道同时存在时进入“臭名昭著”，否则进入“组不到人”。
+- 多多虎或多多球喷人触发的“分崩离析”是隐藏直达结局，不进入补人流程。
+- 网吧到点事件只适用于愤怒月神和元素打击，概率读取 `internet_cafe_leave_pct`。
+
+补人名单会自动排除当前队员、本局已退团人员和没有可用专精数据的人物。批次范围和引荐人名单目前属于代码规则，修改这些名单仍需要改 `src/replacement.ts`；成功率可直接改 CSV。
 
 ## 不建议直接维护
 

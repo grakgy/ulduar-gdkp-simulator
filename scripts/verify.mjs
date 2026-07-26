@@ -11,6 +11,7 @@ try {
   const engine = await server.ssrLoadModule('/src/engine.ts')
   const app = await server.ssrLoadModule('/src/App.tsx')
   const endings = await server.ssrLoadModule('/src/endings.ts')
+  const replacement = await server.ssrLoadModule('/src/replacement.ts')
   const order = engine.shuffled(data.playersPublic, '380')
   const team = order.slice(0, 10).map((player) => engine.createMember(player.player_id, '380'))
   const combatA = engine.simulateCombat('380', data.bosses[0], 1, team, 70, 0)
@@ -80,8 +81,8 @@ try {
     && fourHealerResult.reason.includes('最多容纳3名治疗')
     && extraTankLowDpsResult.reason.includes('至少需要6名输出')
     && lowTankResult.reason.includes('至少220装等')
-  const wipeMoraleConfigValid = oneHealerResult.moraleDelta === -10
-    && engine.simulateCombat('one-healer', data.bosses[3], 2, oneHealerTeam, 60, 0).moraleDelta === -15
+  const wipeMoraleConfigValid = oneHealerResult.moraleDelta === -Number(data.gameConfig.get('wipe_morale_loss_1'))
+    && engine.simulateCombat('one-healer', data.bosses[3], 2, oneHealerTeam, 60, 0).moraleDelta === -Number(data.gameConfig.get('wipe_morale_loss_2'))
 
   const healerScore = (player) => {
     const hidden = data.hiddenById.get(player.player_id)
@@ -298,10 +299,12 @@ try {
   const mainEnding = endings.resolveRunEnding(endingRun({ currentBossId: 'B14', histories: [{ bossId: 'B13', attempts: 2, killed: true, wipes: 1 }] }))
   const leaveEnding = endings.resolveRunEnding(endingRun({ endReason: '成员退团散团', currentBossId: 'B09', leaverId: 'P102', leaveType: '战术下线', team: [endingMember('P092'), endingMember('P102', true)] }))
   const collapseEnding = endings.resolveRunEnding(endingRun({ endReason: '成员退团散团', currentBossId: 'B09', leaverId: 'P096', leaveType: '分崩离析', team: [endingMember('P092'), endingMember('P096', true)] }))
+  const replacementFailureEnding = endings.resolveRunEnding(endingRun({ endReason: '组不到人', currentBossId: 'B09', leaverId: 'P102', leaveReason: '阿茸尝试喊人来替补，但是失败了。', team: [endingMember('P092'), endingMember('P102', true)] }))
+  const notoriousEnding = endings.resolveRunEnding(endingRun({ endReason: '臭名昭著', currentBossId: 'B09', leaverId: 'P102', team: [endingMember('P092'), endingMember('P102', true)] }))
   const bossEnding = endings.resolveRunEnding(endingRun({ endReason: '三次失败', currentBossId: 'B11', histories: [{ bossId: 'B11', attempts: 3, killed: false, wipes: 3 }] }))
   const fallbackEnding = endings.resolveRunEnding(endingRun())
-  const endingPriorityValid = hiddenEnding.priority === 100 && hiddenEnding.hidden && Boolean(hiddenEnding.reward) && princeFailedObserverEnding.priority === 80 && !princeFailedObserverEnding.hidden && fullEnding.priority === 90 && mainEnding.priority === 80 && leaveEnding.priority === 70 && collapseEnding.priority === 70 && collapseEnding.title === '分崩离析' && bossEnding.priority === 60 && fallbackEnding.priority === 10
-    && [hiddenEnding, princeFailedObserverEnding, fullEnding, mainEnding, leaveEnding, collapseEnding, bossEnding, fallbackEnding].every((ending) => ending.title && ending.body && ending.summary)
+  const endingPriorityValid = hiddenEnding.priority === 100 && hiddenEnding.hidden && Boolean(hiddenEnding.reward) && princeFailedObserverEnding.priority === 80 && !princeFailedObserverEnding.hidden && fullEnding.priority === 90 && mainEnding.priority === 80 && leaveEnding.priority === 70 && collapseEnding.priority === 70 && collapseEnding.title === '分崩离析' && replacementFailureEnding.priority === 70 && replacementFailureEnding.title === '组不到人' && notoriousEnding.title === '臭名昭著' && bossEnding.priority === 60 && fallbackEnding.priority === 10
+    && [hiddenEnding, princeFailedObserverEnding, fullEnding, mainEnding, leaveEnding, collapseEnding, replacementFailureEnding, notoriousEnding, bossEnding, fallbackEnding].every((ending) => ending.title && ending.body && ending.summary)
   const payoutEligibilityValid = app.payoutEligible([engine.createMember('P092', 'payout'), { ...engine.createMember('P102', 'payout'), left: true }]).map((member) => member.id).join(',') === 'P092'
 
   const noRezIds = ['P092', 'P083', 'P082', 'P096', 'P084', 'P086', 'P095', 'P097', 'P100', 'P091']
@@ -388,8 +391,76 @@ try {
   const specialCollapseRate = specialCollapseEligible ? specialCollapseObserved / specialCollapseEligible : 0
   const specialLeaveRatesValid = data.hiddenById.get('P089')?.base_leave_pct === '1'
     && data.hiddenById.get('P089')?.leave_policy === '正常'
+    && data.hiddenById.get('P087')?.leave_policy === '条件退队'
+    && data.hiddenById.get('P098')?.leave_policy === '条件退队'
     && ['P104', 'P105', 'P107', 'P108', 'P109', 'P110', 'P111', 'P112', 'P113', 'P114', 'P116', 'P117', 'P119']
       .every((id) => data.hiddenById.get(id)?.base_leave_pct === '2')
+
+  const replacementTeamIds = ['P092', 'P083', 'P084', 'P085', 'P086', 'P087', 'P089', 'P090', 'P093', 'P103']
+  const replacementTeam = replacementTeamIds.map((id) => ({ ...engine.createMember(id, 'replacement-base'), left: id === 'P084' }))
+  let firstReplacementSuccesses = 0
+  let secondReplacementSuccesses = 0
+  let replacementCandidatesValid = true
+  for (let sampleSeed = 1; sampleSeed <= 1000; sampleSeed += 1) {
+    const firstDecision = replacement.replacementDecision(`replacement-${sampleSeed}`, 'B08', 1, 1, 'P084', replacementTeam, 'prep')
+    const secondDecision = replacement.replacementDecision(`replacement-${sampleSeed}`, 'B08', 1, 2, 'P084', replacementTeam, 'prep')
+    if (firstDecision.plan) firstReplacementSuccesses += 1
+    if (secondDecision.plan) secondReplacementSuccesses += 1
+    for (const decision of [firstDecision, secondDecision]) {
+      if (decision.plan && (decision.plan.candidateIds.length < 1 || decision.plan.candidateIds.length > 3 || decision.plan.candidateIds.some((id) => replacementTeamIds.includes(id) || Number(id.slice(1)) < 81 || Number(id.slice(1)) > 120))) replacementCandidatesValid = false
+    }
+  }
+  const firstReplacementRate = firstReplacementSuccesses / 1000
+  const secondReplacementRate = secondReplacementSuccesses / 1000
+  const thirdReplacement = replacement.replacementDecision('replacement-third', 'B08', 1, 3, 'P084', replacementTeam, 'prep')
+  const noRecruiterTeam = ['P001', 'P002', 'P003', 'P004', 'P005', 'P006', 'P007', 'P008', 'P009', 'P010'].map((id) => ({ ...engine.createMember(id, 'no-recruiter'), left: id === 'P001' }))
+  const noRecruiterDecision = replacement.replacementDecision('no-recruiter', 'B08', 1, 1, 'P001', noRecruiterTeam, 'prep')
+  const replacementSystemValid = firstReplacementRate >= .94 && firstReplacementRate <= .98
+    && secondReplacementRate >= .61 && secondReplacementRate <= .67
+    && thirdReplacement.endReason === '臭名昭著'
+    && noRecruiterDecision.endReason === '组不到人'
+    && replacementCandidatesValid
+
+  const tigerTeamIds = ['P081', 'P092', 'P082', 'P083', 'P084', 'P085', 'P086', 'P087', 'P090', 'P097']
+  let tigerEligibleWipes = 0
+  let tigerLeaves = 0
+  for (let sampleSeed = 1; sampleSeed <= 2500; sampleSeed += 1) {
+    const tigerTeam = tigerTeamIds.map((id) => engine.createMember(id, `tiger-leave-${sampleSeed}`))
+    const fight = engine.simulateCombat(`tiger-leave-${sampleSeed}`, data.bosses[12], 2, tigerTeam, 34, 0)
+    if (!fight.killed) {
+      tigerEligibleWipes += 1
+      if (fight.leaver === 'P081') tigerLeaves += 1
+    }
+  }
+  const tigerLeaveRate = tigerEligibleWipes ? tigerLeaves / tigerEligibleWipes : 0
+  const tigerCanActuallyLeave = tigerLeaves > 0 && tigerLeaveRate >= .03
+
+  const buffTeam = ['P084', 'P103', 'P092', 'P081', 'P105', 'P091', 'P094', 'P096'].map((id) => engine.createMember(id, 'buff-team'))
+  const activeBuffIds = new Set(engine.activeRaidBuffs(buffTeam).map((buff) => buff.buff_id))
+  const raidBuffConfigValid = data.raidBuffs.length === 9
+    && ['battle_shout', 'arcane_brilliance', 'blessing_of_kings', 'bloodlust', 'demonic_pact', 'horn_of_winter', 'gift_of_the_wild', 'moonkin_form', 'prayer_of_fortitude'].every((id) => activeBuffIds.has(id))
+
+  const specialEventNames = new Set()
+  let anonymousFailureSamples = 0
+  let anonymousSelfApologies = 0
+  for (let sampleSeed = 1; sampleSeed <= 3000; sampleSeed += 1) {
+    const specialTeam = ['P092', 'P101', 'P082', 'P096', 'P093', 'P081', 'P084', 'P086', 'P097', 'P103'].map((id) => {
+      const member = engine.createMember(id, `special-event-${sampleSeed}`)
+      if (id === 'P082') member.currentSpec = '暗牧'
+      if (id === 'P093') member.currentSpec = '戒律牧'
+      return member
+    })
+    const fight = engine.simulateCombat(`special-event-${sampleSeed}`, data.bosses[4], 1, specialTeam, 70, 0)
+    fight.events.forEach((event) => {
+      if (['没切天赋', '技能没拖出来', '自动奔跑开怪'].includes(event.name)) specialEventNames.add(event.name)
+    })
+    if (!fight.killed && !fight.responsible) {
+      anonymousFailureSamples += 1
+      if (fight.chat.some((line) => /：(?:我的|我锅|这波我背|看见了，我锅)/.test(line))) anonymousSelfApologies += 1
+    }
+  }
+  const specialWipeEventsValid = specialEventNames.size === 3
+  const anonymousFailureChatValid = anonymousFailureSamples > 0 && anonymousSelfApologies === 0
 
   const result = {
     players: data.playersPublic.length,
@@ -482,6 +553,20 @@ try {
     specialCollapseObserved,
     specialCollapseRate: Number(specialCollapseRate.toFixed(3)),
     specialLeaveRatesValid,
+    firstReplacementRate: Number(firstReplacementRate.toFixed(3)),
+    secondReplacementRate: Number(secondReplacementRate.toFixed(3)),
+    replacementCandidatesValid,
+    replacementSystemValid,
+    tigerEligibleWipes,
+    tigerLeaves,
+    tigerLeaveRate: Number(tigerLeaveRate.toFixed(3)),
+    tigerCanActuallyLeave,
+    raidBuffConfigValid,
+    specialWipeEvents: [...specialEventNames],
+    specialWipeEventsValid,
+    anonymousFailureSamples,
+    anonymousSelfApologies,
+    anonymousFailureChatValid,
     wipeChatVariants: wipeOpeners.size,
     recoveryCoverage: softEvents ? Number((recoveredSoftEvents / softEvents).toFixed(3)) : 1,
     namedRecoveryCoverage: softEvents ? Number((namedRecoveries / softEvents).toFixed(3)) : 1,
@@ -490,7 +575,7 @@ try {
     leaveNarrativeTypes: [...leaveNarrativeTypes],
   }
   console.log(JSON.stringify(result, null, 2))
-  if (result.players !== 50 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || result.priceTiers.join(',') !== '200,500,1000,2000' || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.structureFailuresAssignedToLeader || !result.strictCompositionValid || !result.wipeMoraleConfigValid || !result.healerSkillMatters || result.basePriceRate < .2 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.battleResLimitedToOne || !result.tankDeathStopsCombat || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseObserved < 1 || result.specialCollapseRate < .05 || result.specialCollapseRate > .15 || !result.specialLeaveRatesValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.thirdAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
+  if (result.players !== 50 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || result.priceTiers.join(',') !== '200,500,1000,2000' || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.structureFailuresAssignedToLeader || !result.strictCompositionValid || !result.wipeMoraleConfigValid || !result.healerSkillMatters || result.basePriceRate < .2 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.battleResLimitedToOne || !result.tankDeathStopsCombat || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseObserved < 1 || result.specialCollapseRate < .3 || result.specialCollapseRate > .5 || !result.specialLeaveRatesValid || !result.replacementSystemValid || !result.tigerCanActuallyLeave || !result.raidBuffConfigValid || !result.specialWipeEventsValid || !result.anonymousFailureChatValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.thirdAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
 } finally {
   await server.close()
 }

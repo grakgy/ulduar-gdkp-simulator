@@ -1,4 +1,4 @@
-import { bossEvents, chatTemplates, gameConfig, hiddenById, lootPool, playerSpecs, publicById, specsByPlayer, type Boss, type HiddenPlayer, type LootItem, type PlayerSpec, type Role } from './data'
+import { bossEvents, chatTemplates, gameConfig, hiddenById, lootPool, playerSpecs, publicById, raidBuffs, specsByPlayer, type Boss, type HiddenPlayer, type LootItem, type PlayerSpec, type RaidBuff, type Role } from './data'
 
 export interface TeamMember {
   id: string
@@ -57,8 +57,9 @@ export interface CombatResult {
   responsible: string
   chat: string[]
   leaver?: string
-  leaveType?: '开喷退团' | '战术下线' | '直接退团' | '借故离开' | '违规封号' | '分崩离析'
+  leaveType?: '开喷退团' | '战术下线' | '直接退团' | '借故离开' | '违规封号' | '分崩离析' | '网吧到点'
   leaveReason?: string
+  failureCause?: '机制失误' | '输出不足' | '治疗不足' | '阵容失衡'
   moraleDelta: number
   moraleReason: string
   duration: number
@@ -154,6 +155,16 @@ function n(value: string | undefined) { return Number(value ?? 0) }
 function configNumber(key: string, fallback: number) {
   const value = Number(gameConfig.get(key))
   return Number.isFinite(value) ? value : fallback
+}
+
+export function activeRaidBuffs(team: TeamMember[]): RaidBuff[] {
+  return raidBuffs.filter((buff) => team.some((member) => {
+    const player = publicById.get(member.id)
+    const spec = currentSpec(member)
+    if (!player || player.class !== buff.provider_class) return false
+    const requiredSpecs = buff.provider_spec.split('|').map((value) => value.trim()).filter(Boolean)
+    return !requiredSpecs.length || requiredSpecs.includes(spec.spec)
+  }))
 }
 function avg(values: number[]) { return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0 }
 function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)) }
@@ -338,7 +349,8 @@ const caiFamilyIds = new Set(['P108', 'P115', 'P117'])
 function incidentalDeathRisk(boss: Boss, hidden: HiddenPlayer, severeFailure: boolean): number {
   const pressure = ({ 低: 0, 中: .01, 高: .035, 极高: .065 } as const)[boss.healing_pressure]
   const personalWeakness = clamp((72 - n(hidden.awareness)) / 500, 0, .11) + clamp((68 - n(hidden.mechanics)) / 650, 0, .08)
-  return clamp((severeFailure ? .2 : .045) + pressure + personalWeakness, .03, severeFailure ? .42 : .2)
+  const multiplier = configNumber('incidental_death_multiplier', 1.25)
+  return clamp(((severeFailure ? .2 : .045) + pressure + personalWeakness) * multiplier, .03, severeFailure ? .5 : .26)
 }
 
 export function simulateCombat(seed: string, boss: Boss, attempt: number, team: TeamMember[], morale: number, pot: number): CombatResult {
@@ -353,6 +365,15 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const ilvlBonus = (itemLevel - 218) * 0.9
   const attemptBonus = avg(allData.map(({ h, s }) => personalLearningGain(h, s, attempt)))
   const moraleBonus = (morale - 70) * 0.12
+  const lowMoralePenalty = morale < 25
+    ? configNumber('low_morale_power_penalty_25', 7)
+    : morale < 40
+      ? configNumber('low_morale_power_penalty_40', 4)
+      : morale < 55
+        ? configNumber('low_morale_power_penalty_55', 2)
+        : 0
+  const providedBuffs = activeRaidBuffs(team)
+  const raidBuffBonus = Math.min(configNumber('raid_buff_power_cap', 2.4), providedBuffs.reduce((sum, buff) => sum + n(buff.power_bonus), 0))
   const interrupters = allData.filter(({ s }) => s.role !== '治疗' && !['鸟德', '暗牧'].includes(s.spec)).length
   const hasBloodlust = allData.some(({ p }) => p.class === '萨满')
   const hasCommander = allData.some(({ m }) => m.id === 'P092')
@@ -415,12 +436,13 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const allCustomRoster = allData.every(({ h }) => h.source_type === '玩家自建')
   const customCohesionBonus = allCustomRoster ? 2.5 + clamp((78 - baseSkill) * .45, 0, 4.5) : 0
   const customProgressionBonus = allCustomRoster ? clamp(Math.max(0, 76 - baseSkill) * .36 * (n(boss.order) - 1), 0, 28) : 0
+  const balancedCustomBonus = allCustomRoster && baseSkill >= 74 && baseSkill < 80 ? 4 : 0
   const underdogBreakthrough = allCustomRoster
     && baseSkill < 70
     && rngFor(seed, team.map((member) => member.id).join(','), 'underdog-run')() < .032
   const underdogBonus = underdogBreakthrough ? 24 : 0
-  const teamPower = baseSkill + ilvlBonus + attemptBonus + moraleBonus + structurePenalty + eliteCoordinationBonus + (hasCommander ? 1.5 : 0) + observerBonus + customCohesionBonus + customProgressionBonus + underdogBonus
-  const progressionRelief: Record<string, number> = { B04: 2, B05: 2, B07: 2, B08: 3, B09: 3, B10: 4, B11: 5, B12: 4, B13: 6, B14: 28 }
+  const teamPower = baseSkill + ilvlBonus + attemptBonus + moraleBonus - lowMoralePenalty + raidBuffBonus + structurePenalty + eliteCoordinationBonus + (hasCommander ? 1.5 : 0) + observerBonus + customCohesionBonus + customProgressionBonus + balancedCustomBonus + underdogBonus
+  const progressionRelief: Record<string, number> = { B04: 2, B05: 2, B07: 2, B08: 3, B09: 3, B10: 4, B11: 5, B12: 4, B13: 8, B14: 30 }
   const bossDc = n(boss.base_dc) - (progressionRelief[boss.boss_id] ?? 0)
   const events = bossEvents.filter((e) => e.boss_id === boss.boss_id)
   const profile = encounterProfile(boss.boss_id)
@@ -433,6 +455,28 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   let danger = Math.max(0, bossDc + 7 - teamPower)
   let severe = false
   let responsible = ''
+  const specialWipeChance = configNumber('special_wipe_event_pct', .5) / 100
+  const switchedMembers = team.filter((member) => member.currentSpec !== publicById.get(member.id)?.signup_spec)
+  let specialWipe: { target: TeamMember; name: string; detail: string; timeRatio: number } | undefined
+  if (switchedMembers.length && rngFor(seed, boss.boss_id, attempt, 'forgot-spec')() < specialWipeChance) {
+    const target = switchedMembers[Math.floor(rngFor(seed, boss.boss_id, attempt, 'forgot-spec-target')() * switchedMembers.length)]
+    const targetName = publicById.get(target.id)?.name ?? '一名队员'
+    specialWipe = { target, name: '没切天赋', detail: `${targetName}临时切换职责后忘了切换对应天赋，开怪后关键技能全部对不上，第一轮压力直接击穿全团。`, timeRatio: .12 }
+  } else if (rngFor(seed, boss.boss_id, attempt, 'missing-action-bar')() < specialWipeChance) {
+    const target = team[Math.floor(rngFor(seed, boss.boss_id, attempt, 'missing-action-bar-target')() * team.length)]
+    const targetName = publicById.get(target.id)?.name ?? '一名队员'
+    specialWipe = { target, name: '技能没拖出来', detail: `${targetName}轮到使用关键技能时才发现技能没有拖进动作条，临时翻技能书已经来不及，机制当场引爆。`, timeRatio: .18 }
+  } else if (rngFor(seed, boss.boss_id, attempt, 'auto-run-pull')() < specialWipeChance) {
+    const target = team[Math.floor(rngFor(seed, boss.boss_id, attempt, 'auto-run-pull-target')() * team.length)]
+    const targetName = publicById.get(target.id)?.name ?? '一名队员'
+    specialWipe = { target, name: '自动奔跑开怪', detail: `${targetName}误触自动奔跑，战术还没讲完就径直冲进Boss房，坦克和治疗没有准备好，整团被迫接战后迅速倒下。`, timeRatio: .06 }
+  }
+  if (specialWipe) {
+    severe = true
+    responsible = specialWipe.target.id
+    danger += 22
+    results.push({ name: specialWipe.name, status: '失败', detail: specialWipe.detail, responsible: publicById.get(specialWipe.target.id)?.name, timeRatio: specialWipe.timeRatio })
+  }
 
   const recordDeath = (target: TeamMember, eventName: string, timeRatio: number) => {
     const spec = currentSpec(target)
@@ -467,6 +511,7 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   }
 
   for (const [eventIndex, event] of events.entries()) {
+    if (severe) break
     const alive = (members: TeamMember[]) => members.filter((member) => !permanentlyDead.has(member.id))
     const livingTeam = alive(team)
     const targetPool = event.target.includes('坦') ? (alive(tanks).length ? alive(tanks) : livingTeam)
@@ -599,11 +644,10 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const remainingHp = killed ? 0 : fatalEvent
     ? clamp(Math.round(100 - fatalProgress * clamp(78 + (teamPower - bossDc) * .7, 55, 92)), 3, 96)
     : clamp(Math.round(72 - (teamPower - bossDc) * 2.4 + danger * 0.75 + rng() * 18), 1, 96)
-  if (!responsible) responsible = team[Math.floor(rng() * team.length)].id
-  const blamedName = responsible === '团长' ? '团长' : publicById.get(responsible)?.name ?? '未知成员'
+  const blamedName = responsible === '团长' ? '团长' : responsible ? publicById.get(responsible)?.name ?? '未知成员' : ''
   const failedEvent = results.find((r) => r.status === '失败')
   const permanentNames = deaths.filter((death) => !death.battleResurrected).map((death) => death.name)
-  const reason = killed
+  let reason = killed
     ? deaths.length
       ? `${deaths.length} 人次倒地、${deaths.length - permanentlyDead.size} 次战复后，剩余成员把 Boss 收掉了。`
       : '团队稳住了最后一轮机制，Boss含泪交货。'
@@ -675,11 +719,32 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   })
   const teamDps = meters.reduce((sum, meter) => sum + meter.dps, 0)
   const teamHps = meters.reduce((sum, meter) => sum + meter.hps, 0)
+  const deadHealer = deaths.some((death) => death.role === '治疗' && !death.battleResurrected)
+  const deadDamage = deaths.some((death) => death.role.includes('DPS') && !death.battleResurrected)
+  const failureCause: CombatResult['failureCause'] = killed
+    ? undefined
+    : structuralFailure
+      ? '阵容失衡'
+      : failedEvent
+        ? '机制失误'
+        : healingShortfall > 3 || deadHealer
+          ? '治疗不足'
+          : '输出不足'
+  if (!killed && !structuralFailure && !failedEvent) {
+    reason = failureCause === '治疗不足'
+      ? `团队本次只有 ${Math.round(teamHps).toLocaleString()} HPS，减员与持续伤害耗尽了治疗资源，Boss最终还剩 ${remainingHp}%。`
+      : `减员和跑位损失把团队DPS压到 ${Math.round(teamDps).toLocaleString()}，未能赶在狂暴前打完，Boss还剩 ${remainingHp}%。`
+    if (deadDamage && failureCause === '输出不足') reason += ' 输出位阵亡后的缺口已经体现在伤害统计中。'
+  }
 
   if (attempt === 1 && team.some((member) => member.id === 'P092') && rngFor(seed, boss.boss_id, 'P092', 'rule-ban')() < .001) {
     const banEvent: EventResult = { name: '系统制裁', status: '失败', detail: '初中肄业研究规则漏洞时把自己研究进了封号名单，角色原地掉线。', responsible: '初中肄业', timeRatio: .08 }
-    return { bossId: boss.boss_id, attempt, killed: false, remainingHp: 99, events: [banEvent], reason: '核心坦克被系统封禁，团队甚至没来得及讨论这算不算机制。', responsible: 'P092', chat: ['系统：初中肄业的账号已被暂时冻结。', '团长：他研究规则的最终成果出来了。', '队员：这Boss掉落里有申诉链接吗？'], leaver: 'P092', leaveType: '违规封号', leaveReason: '初中肄业因研究规则漏洞触发了极低概率的封号事件，被迫离开团队。', moraleDelta: -10, moraleReason: '指挥兼主坦被系统抬走，全团开始重新理解“不可抗力”', duration: 30, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
+    return { bossId: boss.boss_id, attempt, killed: false, remainingHp: 99, events: [banEvent], reason: '核心坦克被系统封禁，团队甚至没来得及讨论这算不算机制。', responsible: 'P092', chat: ['系统：初中肄业的账号已被暂时冻结。', '团长：他研究规则的最终成果出来了。', '队员：这Boss掉落里有申诉链接吗？'], leaver: 'P092', leaveType: '违规封号', leaveReason: '初中肄业因研究规则漏洞触发了极低概率的封号事件，被迫离开团队。', failureCause: '机制失误', moraleDelta: -10, moraleReason: '指挥兼主坦被系统抬走，全团开始重新理解“不可抗力”', duration: 30, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
   }
+
+  const internetCafeChance = configNumber('internet_cafe_leave_pct', .5) / 100
+  const internetCafeLeaver = allData.find(({ m }) => (m.id === 'P087' || m.id === 'P098')
+    && rngFor(seed, boss.boss_id, attempt, m.id, 'internet-cafe-leave')() < internetCafeChance)
 
   if (killed) {
     const cleanKill = results.every((event) => event.status === '成功')
@@ -687,7 +752,9 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     const moraleDelta = (cleanKill ? 4 : 1) + (atmosphereCelebration ? 3 : 0)
     const baseReason = cleanKill ? '全程没出岔子，干净击杀' : deaths.length ? `${deaths.length} 人次倒地、${deaths.length - permanentlyDead.size} 次战复后完成击杀` : '中间有险情，但最后救回来了'
     const moraleReason = atmosphereCelebration ? `${baseReason}；${encouragerName}带头活跃气氛，额外提振士气` : baseReason
-    return { bossId: boss.boss_id, attempt, killed, remainingHp: 0, events: results, reason, responsible: '', chat: [], moraleDelta, moraleReason, duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
+    const cafeName = internetCafeLeaver?.p.name
+    const cafeChat = cafeName ? [`${cafeName}：网吧到点了，机器马上自动关，我真打不了了。`, `系统：${cafeName} 离开了团队。`] : []
+    return { bossId: boss.boss_id, attempt, killed, remainingHp: 0, events: results, reason, responsible: '', chat: cafeChat, leaver: internetCafeLeaver?.m.id, leaveType: cafeName ? '网吧到点' : undefined, leaveReason: cafeName ? `${cafeName}所在网吧计费到点，无法继续本次副本。` : undefined, moraleDelta, moraleReason, duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
   }
 
   const baseMoraleLoss = -[
@@ -708,7 +775,7 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
           : ['团长：都别找个人锅了，这阵容是我亲手拼出来的事故现场。', '团长：机制没输，数学输了；这锅在组人界面就已经熟了。']
     const roastLines = ['队员：团长终于开始看右边那个职责统计了。', '队员：建议下一把组人时顺便组个阵容。', '队员：Boss没研究明白，排列组合倒是玩上了。', '队员：这不是谁手法差，这是团长在开怪前就把答案选错了。']
     chat = [leaderLines[Math.floor(chatRng() * leaderLines.length)], roastLines[Math.floor(chatRng() * roastLines.length)]]
-  } else {
+  } else if (responsible) {
     const h = hiddenById.get(responsible)!
     const leaderLines = [`团长：别急着放，${failedEvent?.name ?? '刚才那波'}谁漏的？`, `团长：这把能打，${failedEvent?.name ?? '最后一轮'}别再送了。`, '团长：先别拉，刚才技能谁没交？', '团长：行了，都少打字，下一把听口令。', '团长：战斗记录都点名了，先别表演无辜。', '团长：尸体先别释放，锅已经自己走到镜头中间了。']
     const ownLines = ['我的我的，手慢了，下把不会。', '这波我背，刚才技能交晚了。', '看见了，我锅，下把提前走。', '行，录像不用回放了，主角就是我。', '我刚才脑子短暂掉线，下把把它接回来。']
@@ -721,6 +788,14 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     chat = [leaderLines[Math.floor(chatRng() * leaderLines.length)]]
     if (isQuietPlayer(h)) chat.push(`${blamedName}没开麦，也没抢着解释，只在原地跳了一下表示收到。`)
     else chat.push(`${blamedName}：${personalityAnswer ?? answerPool[Math.floor(chatRng() * answerPool.length)]}`)
+  } else {
+    const genericLines = [
+      '团长：这把没有明确的个人锅，最后阶段就是整体输出和治疗一起见底。',
+      '团长：先别主动认领，战斗记录没点到具体的人，回去调整整体节奏。',
+      '团长：前面都处理完了，最后是团队资源不够，不用硬找一个人背锅。',
+      '团长：这次不是谁单独送的，减员和资源缺口一路滚到狂暴了。',
+    ]
+    chat = [genericLines[Math.floor(chatRng() * genericLines.length)]]
   }
   const pressure = allData.find(({ m, h: th }) => m.id !== responsible && !isQuietPlayer(th) && !isGlassHeart(th) && (th.social_primary === '压力怪' || th.social_secondary === '压力怪'))
   const mediator = allData.find(({ m, h: th }) => m.id !== responsible && m.id !== pressure?.m.id && !isQuietPlayer(th) && !isGlassHeart(th) && (th.social_primary === '调解者' || th.social_secondary === '调解者'))
@@ -757,11 +832,12 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const collapseRoasters = allData.filter(({ m }) => m.id === 'P081' || m.id === 'P095')
   if (attempt < 3 && collapseVictimIds.has(responsible) && collapseRoasters.length) {
     const collapseRng = rngFor(seed, boss.boss_id, attempt, responsible, 'collapse-leave')
-    if (collapseRng() < .1) {
+    if (collapseRng() < configNumber('special_collapse_leave_pct', 40) / 100) {
       leaver = responsible
       collapseRoaster = collapseRoasters[Math.floor(collapseRng() * collapseRoasters.length)]
     }
   }
+  if (!leaver && attempt < 3 && internetCafeLeaver) leaver = internetCafeLeaver.m.id
   for (const { m, h: memberHidden } of attempt >= 3 ? [] : allData) {
     if (leaver) break
     if (memberHidden.leave_policy === '永不主动退队') continue
@@ -774,14 +850,15 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     if (m.id === responsible) rate += memberHidden.social_primary === '玻璃心' ? [1.5, 5, 10][attempt - 1] : [0, 1.5, 3][attempt - 1]
     if (remainingHp > 50) rate += [0.5, 2, 4][attempt - 1]
     const perHead = pot / Math.max(team.length, 1)
-    if (perHead > 3500) rate -= Math.min(8, perHead / 1000)
+    if (perHead > 3500) rate -= Math.min(configNumber('high_pot_leave_reduction', 4), perHead / 1000)
     else if (attempt > 1 && memberHidden.economy_type === '排骨党') rate += attempt === 2 ? 1.5 : 4
     if (memberHidden.economy_type === '排骨党' && pot > 20000) rate -= 5
-    if (baseSkill >= 88) rate -= 6
-    else if (baseSkill >= 84) rate -= 3
+    if (baseSkill >= 88) rate -= 4
+    else if (baseSkill >= 84) rate -= 2
     if (hasEncourager) rate -= 1
     if (hasCommander) rate -= 1
     if (m.id === 'P092' && baseSkill < 75) rate += (75 - baseSkill) * .25
+    if (m.id === 'P081' && attempt >= 2 && (remainingHp > 35 || projectedMorale < 55 || baseSkill < 82)) rate += 12
     if (m.id === 'P095' && attempt >= 2 && (remainingHp > 35 || baseSkill < 80)) rate += 14
     if (m.id === 'P120' && attempt >= 2 && baseSkill < 78) rate += Math.min(18, (78 - baseSkill) * .8)
     if (hasDbFriction && [memberHidden.social_primary, memberHidden.social_secondary].includes('厌蠢症')) rate += 3
@@ -804,6 +881,10 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
       leaveType = '分崩离析'
       leaveReason = `${leaveName}在个人失误导致灭团后遭到${collapseRoaster.p.name}当众指责，争执升级并直接退团，团队随即瓦解。`
       chat.push(`${collapseRoaster.p.name}：${roast}`, `${leaveName}：行，那你们自己打。`, `系统：${leaveName} 离开了团队。`)
+    } else if (internetCafeLeaver?.m.id === leaver) {
+      leaveType = '网吧到点'
+      leaveReason = `${leaveName}所在网吧计费到点，无法继续本次副本。`
+      chat.push(`${leaveName}：网吧到点了，机器马上自动关，我真打不了了。`, `团长：先别关，等我喊个替补。`, `系统：${leaveName} 离开了团队。`)
     } else if (isSilent && leaveRng < 0.72) {
       leaveType = '战术下线'
       leaveReason = `${leaveName}在连续灭团后始终没有回应，随后角色直接离线，团队无法继续。`
@@ -839,7 +920,7 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   }
   if (attempt >= 3) chat.push('团长：三把打完了，今天就到这，散。', '系统：本 Boss 三次尝试均告失败。')
   const moraleReason = structuralFailure ? `职责配置失衡，团长背锅：${structureIssue!.reason}` : remainingHp < 10 ? `只差 ${remainingHp}% 灭团，大家觉得还有机会` : `第 ${attempt} 次灭团，Boss 还剩 ${remainingHp}%`
-  return { bossId: boss.boss_id, attempt, killed, remainingHp, events: results, reason, responsible, chat, leaver, leaveType, leaveReason, moraleDelta, moraleReason, duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
+  return { bossId: boss.boss_id, attempt, killed, remainingHp, events: results, reason, responsible, chat, leaver, leaveType, leaveReason, failureCause, moraleDelta, moraleReason, duration, teamDps, teamHps, meters, deaths, casualties: permanentlyDead.size, battleReses: deaths.length - permanentlyDead.size }
 }
 
 export function itemStartPrice(item: LootItem): number {
