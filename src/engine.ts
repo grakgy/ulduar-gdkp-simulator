@@ -1174,8 +1174,8 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
   const teamDps = previewMeters.reduce((sum, meter) => sum + meter.dps, 0)
   const teamHps = previewMeters.reduce((sum, meter) => sum + meter.hps, 0)
   const requiredDpsByBoss: Record<string, number> = {
-    B01: 28000, B02: 36000, B03: 38000, B04: 42000, B05: 42000, B06: 42000, B07: 43000,
-    B08: 45000, B09: 45000, B10: 47000, B11: 49000, B12: 48500, B13: 51000, B14: 52000,
+    B01: 28500, B02: 36000, B03: 38000, B04: 42000, B05: 42500, B06: 42000, B07: 43000,
+    B08: 45500, B09: 45500, B10: 47500, B11: 49500, B12: 49500, B13: 52000, B14: 54500,
   }
   const requiredTeamDps = requiredDpsByBoss[boss.boss_id] ?? 42000
   const requiredTeamHps = boss.tank_mode === '载具' ? 0 : ({ 低: 7000, 中: 8200, 高: 9800, 极高: 11000 } as const)[boss.healing_pressure]
@@ -1440,8 +1440,9 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
 
   if (killed) {
     const cleanKill = results.every((event) => event.status === '成功')
-    const atmosphereCelebration = hasEncourager && rngFor(seed, boss.boss_id, attempt, encourager?.m.id ?? '', 'atmosphere-celebration')() < .3
-    const cleanKillMorale = cleanKill ? 1 + Math.floor(rngFor(seed, boss.boss_id, attempt, 'clean-kill-morale')() * 3) : 1
+    const atmosphereCelebration = hasEncourager && rngFor(seed, boss.boss_id, attempt, encourager?.m.id ?? '', 'atmosphere-celebration')() < .2
+    const cleanKillMoraleRoll = rngFor(seed, boss.boss_id, attempt, 'clean-kill-morale')()
+    const cleanKillMorale = cleanKill ? cleanKillMoraleRoll < .65 ? 1 : cleanKillMoraleRoll < .9 ? 2 : 3 : 1
     const moraleDelta = cleanKillMorale + (atmosphereCelebration ? 3 : 0)
     const battleResSummary = battleResDeath
       ? usedSelfRes

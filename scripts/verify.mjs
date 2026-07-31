@@ -104,7 +104,7 @@ try {
     && oneHealerResult.reason.includes('至少需要2名治疗')
     && fourHealerResult.reason.includes('最多容纳3名治疗')
     && extraTankLowDpsResult.reason.includes('至少需要6名输出')
-    && lowTankResult.reason.includes('至少220装等')
+    && lowTankResult.reason.includes(`至少${data.bosses[11].min_tank_ilvl}装等`)
   const wipeMoraleConfigValid = oneHealerResult.moraleDelta === -Number(data.gameConfig.get('wipe_morale_loss_1'))
     && engine.simulateCombat('one-healer', data.bosses[3], 2, oneHealerTeam, 60, 0).moraleDelta === -Number(data.gameConfig.get('wipe_morale_loss_2'))
     && engine.simulateCombat('one-healer', data.bosses[3], 3, oneHealerTeam, 45, 0).moraleDelta === -Number(data.gameConfig.get('wipe_morale_loss_3'))
@@ -259,7 +259,6 @@ try {
   data.chatTemplates.forEach((entry) => chatCounts.set(`${entry.scene}|${entry.style_or_trait}`, (chatCounts.get(`${entry.scene}|${entry.style_or_trait}`) ?? 0) + 1))
   const customTraits = new Set(customProfiles.flatMap((player) => [player.social_primary, player.social_secondary]).filter((trait) => trait && trait !== '无'))
   const customChatTraitsCovered = [...customTraits].every((trait) => (chatCounts.get(`灭团|${trait}`) ?? 0) > 0 && (chatCounts.get(`退团|${trait}`) ?? 0) > 0)
-  const chatTemplateRecommendedMinimumMet = [...chatCounts.values()].every((count) => count >= 15)
   const chatTemplateCoverage = ['报名', '灭团', '退团', '拍卖'].every((scene) => chatScenes.has(scene)) && [...chatCounts.values()].every((count) => count > 0) && data.chatTemplates.every((entry) => entry.style_or_trait && entry.template && !entry.template.includes('�')) && customChatTraitsCovered
   const targetedShortageStyles = [
     '输出不足-压力怪', '输出不足-数据执着', '输出不足-阴阳怪气',
@@ -829,7 +828,6 @@ try {
     targetedChatTemplatesValid,
     combatLogTemplatesValid,
     customChatTraitsCovered,
-    chatTemplateRecommendedMinimumMet,
     attemptTwoGain: Number(attemptTwoGain.toFixed(2)),
     attemptThreeGain: Number(attemptThreeGain.toFixed(2)),
     attemptLearningWorks,

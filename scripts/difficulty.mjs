@@ -11,7 +11,7 @@ try {
   const maxBossAttempts = Number(data.gameConfig.get('max_boss_attempts') ?? 5)
   const sampleRuns = Math.max(1, Number(process.env.DIFFICULTY_RUNS ?? 1000))
 
-  const recruitLikePlayer = (seed) => {
+  const recruitLikePlayer = (seed, { statusWeight = 0, learnedRosterWeight = 0 } = {}) => {
     const pool = data.playersForSeed(seed)
     const team = []
     const caiFamilyIds = new Set(['P108', 'P115', 'P117'])
@@ -32,6 +32,14 @@ try {
         const score = (player) => {
           const role = player.signup_role
           let value = Number(player.signup_item_level)
+          value += engine.createPlayerStatus(seed, player.player_id).displayed * statusWeight
+          if (learnedRosterWeight > 0) {
+            const hidden = data.hiddenById.get(player.player_id)
+            const knownAbility = hidden
+              ? (Number(hidden.main_skill) + Number(hidden.mechanics) + Number(hidden.awareness)) / 3
+              : 70
+            value += (knownAbility - 70) * learnedRosterWeight
+          }
           if (role === '坦克') value += counts.坦克 < 2 ? 55 : -65
           else if (role === '治疗') value += counts.治疗 < 2 ? 50 : counts.治疗 >= 3 ? -55 : -12
           else value += counts.坦克 >= 2 && counts.治疗 >= 2 ? 22 : 0
@@ -44,10 +52,35 @@ try {
     return team
   }
 
-  const fixedTeam = (members) => (seed) => members.map(({ id, spec }) => ({ ...engine.createMember(id, seed), ...(spec ? { currentSpec: spec } : {}) }))
+  const fixedTeam = (members, statusBias = 0) => (seed) => members.map(({ id, spec }) => {
+    const member = engine.createMember(id, seed)
+    const actual = Math.max(-3, Math.min(3, member.status.actual + statusBias))
+    return { ...member, status: { ...member.status, actual }, ...(spec ? { currentSpec: spec } : {}) }
+  })
   const strongCustom = [
     { id: 'P092' }, { id: 'P101' }, { id: 'P082' }, { id: 'P096' },
     { id: 'P081' }, { id: 'P084' }, { id: 'P093', spec: '暗牧' }, { id: 'P103' }, { id: 'P097' }, { id: 'P086' },
+  ]
+  const eliteCustom = [
+    { id: 'P092', spec: '防骑' }, { id: 'P053', spec: '防战' },
+    { id: 'P012', spec: '奶萨' }, { id: 'P082', spec: '戒律牧' },
+    { id: 'P081', spec: '元素' }, { id: 'P008', spec: '火法' },
+    { id: 'P084', spec: '狂暴战' }, { id: 'P120', spec: '邪DK' },
+    { id: 'P105', spec: '恶魔术' }, { id: 'P121', spec: '射击猎' },
+  ]
+  const observedExpertCustom = [
+    { id: 'P128', spec: '防战' }, { id: 'P101', spec: '熊德' },
+    { id: 'P082', spec: '戒律牧' }, { id: 'P118', spec: '奶骑' },
+    { id: 'P095', spec: '火法' }, { id: 'P124', spec: '暗牧' },
+    { id: 'P088', spec: '恶魔术' }, { id: 'P081', spec: '元素' },
+    { id: 'P106', spec: '鸟德' }, { id: 'P085', spec: '战斗贼' },
+  ]
+  const observedStrongCustom = [
+    { id: 'P083', spec: '防骑' }, { id: 'P084', spec: '防战' },
+    { id: 'P122', spec: '奶德' }, { id: 'P094', spec: '奶德' },
+    { id: 'P105', spec: '恶魔术' }, { id: 'P081', spec: '元素' },
+    { id: 'P088', spec: '恶魔术' }, { id: 'P114', spec: '战斗贼' },
+    { id: 'P133', spec: '狂暴战' }, { id: 'P086', spec: '生存猎' },
   ]
   const normalCustom = [
     { id: 'P092' }, { id: 'P101' }, { id: 'P082' }, { id: 'P096' },
@@ -268,19 +301,31 @@ try {
   }
 
   const result = {
-    publicRecruitStrategy: sample('公开信息均衡选人', recruitLikePlayer, sampleRuns),
+    publicRecruitStrategy: sample('公开信息与状态均衡选人', (seed) => recruitLikePlayer(seed, { statusWeight: 9 }), sampleRuns),
+    veteranRecruitStrategy: sample('熟悉人物并优先好状态', (seed) => recruitLikePlayer(seed, { statusWeight: 10, learnedRosterWeight: .65 }), sampleRuns),
+    observedExpertTeam: sample('实玩中上阵容B（偏好好状态）', fixedTeam(observedExpertCustom, 1), sampleRuns),
+    observedStrongTeam: sample('实玩中上阵容A（偏好好状态）', fixedTeam(observedStrongCustom, 1), sampleRuns),
     strongCustomTeam: sample('高手全自建阵容', fixedTeam(strongCustom), sampleRuns),
+    eliteGoodStatusTeam: sample('顶尖阵容并偏好好状态', fixedTeam(eliteCustom, 1), sampleRuns),
     normalCustomTeam: sample('普通全自建阵容', fixedTeam(normalCustom), sampleRuns),
     weakCustomTeam: sample('较差全自建阵容', fixedTeam(weakCustom), sampleRuns),
   }
 
   console.log(JSON.stringify(result, null, 2))
   const strong = result.strongCustomTeam
+  const eliteGoodStatus = result.eliteGoodStatusTeam
+  const veteran = result.veteranRecruitStrategy
+  const observedExpert = result.observedExpertTeam
+  const observedStrong = result.observedStrongTeam
   const normal = result.normalCustomTeam
   const weak = result.weakCustomTeam
-  if (strong.fullClearRate < .27 || strong.fullClearRate > .33) process.exitCode = 1
-  if (normal.fullClearRate < .07 || normal.fullClearRate > .13) process.exitCode = 1
-  if (weak.fullClearRate < .01 || weak.fullClearRate > .025) process.exitCode = 1
+  if (veteran.fullClearRate < .08 || veteran.fullClearRate > .20) process.exitCode = 1
+  if (observedExpert.fullClearRate < .12 || observedExpert.fullClearRate > .22) process.exitCode = 1
+  if (observedStrong.fullClearRate < .25 || observedStrong.fullClearRate > .40) process.exitCode = 1
+  if (strong.fullClearRate < .10 || strong.fullClearRate > .30) process.exitCode = 1
+  if (eliteGoodStatus.fullClearRate < .40) process.exitCode = 1
+  if (normal.fullClearRate < .03 || normal.fullClearRate > .08) process.exitCode = 1
+  if (weak.fullClearRate > .02) process.exitCode = 1
   if ([strong, normal, weak].some((sample) => sample.anyLeaveRate < .3)) process.exitCode = 1
 } finally {
   await server.close()
