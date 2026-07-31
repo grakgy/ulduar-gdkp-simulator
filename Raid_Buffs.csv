@@ -1,10 +1,11 @@
-buff_id,buff_name,provider_class,provider_spec,power_bonus,icon_file,description
-battle_shout,战斗怒吼,战士,,0.25,ability_warrior_battleshout.png,提高物理职业的稳定输出
-arcane_brilliance,奥术光辉,法师,,0.20,Arcane Intellect.png,提高法系输出与治疗续航
-blessing_of_kings,王者祝福,圣骑士,,0.30,Blessing of Kings.png,小幅提高全团综合属性
-bloodlust,嗜血/英勇,萨满,,0.45,Bloodlust.png,提高关键阶段爆发能力
-demonic_pact,恶魔契约,术士,恶魔术,0.30,Demonic Pact.png,提高法系输出与治疗强度
-horn_of_winter,寒冬号角,死亡骑士,,0.25,Horn of Winter.png,提高近战和坦克表现
-gift_of_the_wild,野性赐福,德鲁伊,,0.25,Mark of the Wild.png,提高全团生存与稳定性
-moonkin_form,枭兽形态,德鲁伊,鸟德,0.25,Moonkin Form.png,提高法术输出协同
-prayer_of_fortitude,坚韧祷言,牧师,,0.25,Power Word Fortitude.png,提高全团血量与容错
+buff_id,buff_name,provider_class,provider_spec,power_bonus,physical_pct,caster_pct,melee_pct,ranged_pct,healing_pct,icon_file,description
+battle_shout,战斗怒吼,战士,,0.25,3,0,2,0,0,ability_warrior_battleshout.png,物理输出提高3%；近战额外提高2%
+arcane_brilliance,奥术光辉,法师,,0.20,0,4,0,0,3,Arcane Intellect.png,法系输出提高4%；治疗提高3%
+blessing_of_kings,王者祝福,圣骑士,,0.40,1.5,1.5,0,0,1.5,Blessing of Kings.png,所有输出与治疗提高1.5%
+bloodlust,嗜血,萨满,,0.60,4,4.5,1,1,3.5,Bloodlust.png,所有输出与治疗提高4%；DPS额外提高1%
+demonic_pact,恶魔契约,术士,恶魔术,0.30,0,4,0,0,3,Demonic Pact.png,法系输出提高4%；治疗提高3%
+horn_of_winter,寒冬号角,死亡骑士,,0.25,3,0,2,0,0,Horn of Winter.png,物理输出提高3%；近战额外提高2%
+gift_of_the_wild,野性赐福,德鲁伊,,0.45,1,1,0,0,1,Mark of the Wild.png,全团输出与治疗提高1%，并提高稳定性
+moonkin_form,枭兽形态,德鲁伊,鸟德,0.25,0,4,0,2,0,Moonkin Form.png,法系输出提高4%；远程额外提高2%
+prayer_of_fortitude,坚韧祷言,牧师,,0.45,0,0,0,0,2,Power Word Fortitude.png,治疗提高2%，并提高全团容错
+savage_combat,野蛮战斗,盗贼,战斗贼,0.15,2,0,0,0,0,Savage Combat.jpg,物理输出提高2%

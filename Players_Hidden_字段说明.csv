@@ -14,7 +14,6 @@ social_secondary,社交,文本,多个类型用竖线分隔,用于补充第二性
 base_leave_pct,退团,小数,0-1,基础主动退团概率，仍会叠加战况与性格修正
 economy_type,消费,枚举,经济类型表中的类型,决定装备需求、捡漏和老板行为
 wallet_gold,消费,整数,>=0,角色当前可用于拍卖的金币
-reserve_gold,消费,整数,>=0,角色尽量不动用的保留资金
 spend_willingness,消费,整数,0-100,有适用装备时参与竞价的意愿
 bid_aggression,消费,整数,0-100,竞价时主动抬价和追价的倾向
 bargain_factor,消费,小数,0-1,对低价和性价比的偏好程度

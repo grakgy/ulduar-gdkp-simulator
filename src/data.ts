@@ -8,6 +8,7 @@ import chatTemplatesRaw from '../Chat_Templates.csv?raw'
 import combatLogTemplatesRaw from '../Combat_Log_Templates.csv?raw'
 import gameConfigRaw from '../Game_Config.csv?raw'
 import raidBuffsRaw from '../Raid_Buffs.csv?raw'
+import specProfilesRaw from '../Specs.csv?raw'
 
 export type Role = '坦克' | '治疗' | '近战DPS' | '远程DPS'
 
@@ -41,7 +42,6 @@ export interface HiddenPlayer {
   base_leave_pct: string
   economy_type: string
   wallet_gold: string
-  reserve_gold: string
   spend_willingness: string
   bid_aggression: string
   bargain_factor: string
@@ -57,9 +57,12 @@ export interface HiddenPlayer {
 }
 
 export interface ChatTemplate {
-  scene: '报名' | '灭团' | '退团' | '拍卖'
+  scene: '报名' | '灭团' | '退团' | '拍卖' | '补人'
   style_or_trait: string
   template: string
+  speaker_scope?: string
+  target_scope?: string
+  maintenance_note?: string
 }
 
 export interface CombatLogTemplate {
@@ -73,6 +76,11 @@ export interface RaidBuff {
   provider_class: string
   provider_spec: string
   power_bonus: string
+  physical_pct: string
+  caster_pct: string
+  melee_pct: string
+  ranged_pct: string
+  healing_pct: string
   icon_file: string
   description: string
 }
@@ -92,6 +100,19 @@ export interface PlayerSpec {
   boss_experience: string
   willing_switch: string
   publicly_claimed: string
+}
+
+export interface SpecProfile {
+  spec: string
+  class: string
+  role: Role
+  utility_tags: string
+  throughput: string
+  burst: string
+  multitarget: string
+  mobility: string
+  survivability: string
+  utility: string
 }
 
 export interface Boss {
@@ -133,6 +154,8 @@ export interface LootItem {
   boss_id: string
   drop_group: string
   item_name: string
+  item_id: string
+  icon_file: string
   slot: string
   category: string
   eligible_tags: string
@@ -178,9 +201,11 @@ export const chatTemplates = parseCsv<ChatTemplate>(chatTemplatesRaw)
 export const combatLogTemplates = parseCsv<CombatLogTemplate>(combatLogTemplatesRaw)
 export const gameConfig = new Map(parseCsv<GameConfigRow>(gameConfigRaw).map((entry) => [entry.key, entry.value]))
 export const raidBuffs = parseCsv<RaidBuff>(raidBuffsRaw)
+export const specProfiles = parseCsv<SpecProfile>(specProfilesRaw)
 
 export const publicById = new Map(fullPlayersPublic.map((p) => [p.player_id, p]))
 export const hiddenById = new Map(playersHidden.map((p) => [p.player_id, p]))
+export const specProfileByName = new Map(specProfiles.map((profile) => [profile.spec, profile]))
 export const specsByPlayer = new Map<string, PlayerSpec[]>()
 for (const spec of playerSpecs) {
   const list = specsByPlayer.get(spec.player_id) ?? []
@@ -197,13 +222,13 @@ function poolHash(input: string): number {
   return hash >>> 0
 }
 
-export function playersForSeed(seed: string, poolSize = Number(gameConfig.get('player_pool_size') ?? 50)): PublicPlayer[] {
+export function playersForSeed(seed: string, randomCount = Number(gameConfig.get('random_player_count') ?? 5)): PublicPlayer[] {
   const custom = fullPlayersPublic.filter((player) => hiddenById.get(player.player_id)?.source_type === '玩家自建')
   const random = fullPlayersPublic
     .filter((player) => hiddenById.get(player.player_id)?.source_type === '随机生成')
     .sort((left, right) => poolHash(`${seed}|pool|${left.player_id}`) - poolHash(`${seed}|pool|${right.player_id}`))
-  return [...custom, ...random.slice(0, Math.max(0, poolSize - custom.length))]
+  return [...custom, ...random.slice(0, Math.max(0, randomCount))]
 }
 
-// 保留旧导出供脚本与外部调用使用；实际游戏会固定加入 40 名自建人物，再按本局 seed 补入 10 名随机人物。
+// 保留旧导出供脚本与外部调用使用；实际游戏会加入全部自建人物，再按本局 seed 加入固定数量的随机人物。
 export const playersPublic = playersForSeed('380')

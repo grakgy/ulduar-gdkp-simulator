@@ -264,7 +264,7 @@ desireScore =
 
 ```ts
 maxBid = min(
-  wallet - reserveGold,
+  wallet,
   item.referencePrice * economyMultiplier * random(0.85, 1.15)
 );
 ```

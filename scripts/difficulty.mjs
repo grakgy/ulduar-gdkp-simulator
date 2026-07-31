@@ -6,6 +6,10 @@ try {
   const data = await server.ssrLoadModule('/src/data.ts')
   const engine = await server.ssrLoadModule('/src/engine.ts')
   const replacement = await server.ssrLoadModule('/src/replacement.ts')
+  const runEvents = await server.ssrLoadModule('/src/runEvents.ts')
+  const endings = await server.ssrLoadModule('/src/endings.ts')
+  const maxBossAttempts = Number(data.gameConfig.get('max_boss_attempts') ?? 5)
+  const sampleRuns = Math.max(1, Number(process.env.DIFFICULTY_RUNS ?? 1000))
 
   const recruitLikePlayer = (seed) => {
     const pool = data.playersForSeed(seed)
@@ -50,9 +54,61 @@ try {
     { id: 'P103' }, { id: 'P110' }, { id: 'P111' }, { id: 'P097' }, { id: 'P114' }, { id: 'P081' },
   ]
   const weakCustom = [
-    { id: 'P083' }, { id: 'P101' }, { id: 'P117' }, { id: 'P099' },
-    { id: 'P087' }, { id: 'P116' }, { id: 'P109' }, { id: 'P113' }, { id: 'P098' }, { id: 'P089' },
+    { id: 'P092' }, { id: 'P034' }, { id: 'P096' }, { id: 'P102' },
+    { id: 'P054' }, { id: 'P111' }, { id: 'P031' }, { id: 'P106' }, { id: 'P064' }, { id: 'P112' },
   ]
+
+  const adaptSpecsForBoss = (team, boss) => {
+    if (boss.tank_mode === '载具') return team
+    const active = team.filter((member) => !member.left)
+    const activeHealers = active.filter((member) => engine.currentSpec(member).role === '治疗')
+    const activeTanks = active.filter((member) => engine.currentSpec(member).role === '坦克')
+    const activeDamage = active.filter((member) => engine.currentSpec(member).role.includes('DPS'))
+    const healerSkill = activeHealers.length
+      ? activeHealers.reduce((sum, member) => sum + Number(engine.currentSpec(member).skill), 0) / activeHealers.length
+      : 0
+    const needsExtraHealer = ['高', '极高'].includes(boss.healing_pressure) && healerSkill < 76
+    const minTanks = Number(boss.min_tanks)
+    const maxTanks = Number(boss.max_tanks)
+    const minHealers = Number(boss.min_healers)
+    const maxHealers = Number(boss.max_healers)
+    const desiredHealers = needsExtraHealer ? maxHealers : Math.max(minHealers, Math.min(maxHealers, activeHealers.length))
+    const currentRequiredDamage = activeTanks.length > minTanks ? Math.max(Number(boss.min_dps), Number(boss.extra_tank_min_dps)) : Number(boss.min_dps)
+    const currentValid = activeTanks.length >= minTanks
+      && activeTanks.length <= maxTanks
+      && activeHealers.length === desiredHealers
+      && activeDamage.length >= currentRequiredDamage
+    if (currentValid) return team
+
+    let states = new Map([['0,0,0', { score: 0, specs: [] }]])
+    for (const member of active) {
+      const choices = engine.publicSpecs(member.id)
+      const next = new Map()
+      for (const [state, plan] of states) {
+        const [tanks, healers, damage] = state.split(',').map(Number)
+        for (const spec of choices) {
+          const nextTanks = tanks + (spec.role === '坦克' ? 1 : 0)
+          const nextHealers = healers + (spec.role === '治疗' ? 1 : 0)
+          const nextDamage = damage + (spec.role.includes('DPS') ? 1 : 0)
+          if (nextTanks > maxTanks || nextHealers > desiredHealers) continue
+          const key = `${nextTanks},${nextHealers},${nextDamage}`
+          const score = plan.score + Number(spec.skill) + (spec.spec === member.currentSpec ? .05 : 0)
+          if (!next.has(key) || next.get(key).score < score) next.set(key, { score, specs: [...plan.specs, spec.spec] })
+        }
+      }
+      states = next
+    }
+    const valid = [...states.entries()]
+      .filter(([state]) => {
+        const [tanks, healers, damage] = state.split(',').map(Number)
+        const requiredDamage = tanks > minTanks ? Math.max(Number(boss.min_dps), Number(boss.extra_tank_min_dps)) : Number(boss.min_dps)
+        return tanks >= minTanks && tanks <= maxTanks && healers === desiredHealers && damage >= requiredDamage
+      })
+      .sort((left, right) => right[1].score - left[1].score)[0]?.[1]
+    if (!valid) return team
+    const specById = new Map(active.map((member, index) => [member.id, valid.specs[index]]))
+    return team.map((member) => member.left ? member : { ...member, currentSpec: specById.get(member.id) ?? member.currentSpec })
+  }
 
   const playRun = (seed, makeTeam) => {
     let team = makeTeam(seed)
@@ -60,7 +116,47 @@ try {
     let pot = 0
     let cleared = 0
     let leaveCount = 0
+    let anyLeave = false
+    let ordinaryLeave = false
+    let collapseLeave = false
+    let internetCafeLeave = false
+    let histories = []
+    let currentBossId = data.bosses[0].boss_id
+    let lastLeaver
+    let lastLeaveType
+    let lastLeaveReason
+    let lastFailureCause
+    let lastFailureReason
     const activeTeam = () => team.filter((member) => !member.left)
+    const cumulativeWipes = () => histories.reduce((sum, history) => sum + history.wipes, 0)
+    const updateHistory = (boss, attempt, killed) => {
+      const old = histories.find((history) => history.bossId === boss.boss_id)
+      histories = [
+        ...histories.filter((history) => history.bossId !== boss.boss_id),
+        { bossId: boss.boss_id, attempts: attempt, killed, wipes: (old?.wipes ?? 0) + (killed ? 0 : 1) },
+      ]
+    }
+    const finish = (end, boss) => {
+      const ending = endings.resolveRunEnding({
+        seed,
+        endReason: end === '全通' ? '全通MVP' : end === '五灭' ? '五次失败' : end,
+        currentBossId,
+        histories,
+        team: team.map((member) => ({
+          id: member.id,
+          name: data.publicById.get(member.id)?.name ?? member.id,
+          left: member.left,
+          blame: member.blame,
+          personality: data.hiddenById.get(member.id)?.personality_type ?? '',
+        })),
+        bosses: data.bosses.map((entry) => ({ id: entry.boss_id, name: entry.boss_name, order: Number(entry.order) })),
+        pot,
+        leaverId: lastLeaver,
+        leaveType: lastLeaveType,
+        leaveReason: lastLeaveReason,
+      })
+      return { cleared, end, boss, anyLeave, ordinaryLeave, collapseLeave, internetCafeLeave, leaveCount, endingTitle: ending.title, hiddenEnding: ending.hidden, failureCause: lastFailureCause, failureReason: lastFailureReason }
+    }
     const mergeActive = (updated) => {
       const byId = new Map(updated.map((member) => [member.id, member]))
       team = team.map((member) => member.left ? member : byId.get(member.id) ?? member)
@@ -83,19 +179,48 @@ try {
         })[0]
     }
     for (const boss of data.bosses) {
+      team = adaptSpecsForBoss(team, boss)
+      currentBossId = boss.boss_id
       let killed = false
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
+      for (let attempt = 1; attempt <= maxBossAttempts; attempt += 1) {
         const result = engine.simulateCombat(seed, boss, attempt, activeTeam(), morale, pot)
+        lastFailureCause = result.failureCause
+        lastFailureReason = result.failureCause ? result.reason : undefined
         morale = Math.max(0, Math.min(100, morale + result.moraleDelta))
-        if (result.leaver) {
+        team = team.map((member) => ({ ...member, blame: member.blame + (member.id === result.responsible ? 1 : 0) }))
+        updateHistory(boss, attempt, result.killed)
+        if (result.leaveType === '分崩离析' && result.leaver) {
+          anyLeave = true
+          collapseLeave = true
+          lastLeaver = result.leaver
+          lastLeaveType = result.leaveType
+          lastLeaveReason = result.leaveReason
           team = team.map((member) => member.id === result.leaver ? { ...member, left: true } : member)
-          if (result.leaveType === '分崩离析') return { cleared, end: '分崩离析', boss: boss.boss_name }
+          return finish('成员退团散团', boss.boss_name)
+        }
+        if (!result.killed) {
+          const directEnding = runEvents.hiddenEndingAfterWipe(seed, morale, pot, cleared, cumulativeWipes())
+          if (directEnding) return finish(directEnding.reason, boss.boss_name)
+          if (attempt >= maxBossAttempts) return finish('五灭', boss.boss_name)
+        }
+        if (result.leaver) {
+          anyLeave = true
+          internetCafeLeave ||= result.leaveType === '网吧到点'
+          ordinaryLeave ||= !['分崩离析', '违规封号'].includes(result.leaveType ?? '')
+          lastLeaver = result.leaver
+          lastLeaveType = result.leaveType
+          lastLeaveReason = result.leaveReason
+          team = team.map((member) => member.id === result.leaver ? { ...member, left: true } : member)
           leaveCount += 1
           const decision = replacement.replacementDecision(seed, boss.boss_id, attempt, leaveCount, result.leaver, team, result.killed ? 'auction' : 'prep')
-          if (!decision.plan) return { cleared, end: decision.endReason ?? '组不到人', boss: boss.boss_name }
+          if (!decision.plan) {
+            lastLeaveReason = `${lastLeaveReason ?? ''} ${decision.failureText ?? ''}`.trim()
+            return finish(decision.endReason ?? '组不到人', boss.boss_name)
+          }
           const picked = chooseReplacement(decision.plan.candidateIds)
-          if (!picked) return { cleared, end: '组不到人', boss: boss.boss_name }
+          if (!picked) return finish('组不到人', boss.boss_name)
           team.push(engine.createMember(picked.player_id, seed))
+          team = adaptSpecsForBoss(team, boss)
         }
         if (!result.killed) continue
         const auction = engine.runAuction(seed, boss, activeTeam())
@@ -103,18 +228,26 @@ try {
         pot += auction.potGain
         morale = Math.max(0, Math.min(100, morale + auction.moraleDelta))
         cleared += 1
+        const blackGold = runEvents.hiddenEndingAfterAuction(seed, pot, cleared, data.bosses.length)
+        if (blackGold) return finish(blackGold.reason, boss.boss_name)
         killed = true
         break
       }
-      if (!killed) return { cleared, end: '三灭', boss: boss.boss_name }
+      if (!killed) return finish('五灭', boss.boss_name)
     }
-    return { cleared, end: '全通', boss: '全通' }
+    return finish('全通', '全通')
   }
 
   const sample = (label, makeTeam, runs) => {
     const results = Array.from({ length: runs }, (_, index) => playRun(`difficulty-${label}-${index + 1}`, makeTeam))
     const stops = new Map()
+    const hiddenEndings = new Map()
+    const failureCauses = new Map()
+    const failureDetails = new Map()
     results.forEach((result) => stops.set(result.boss, (stops.get(result.boss) ?? 0) + 1))
+    results.filter((result) => result.hiddenEnding).forEach((result) => hiddenEndings.set(result.endingTitle, (hiddenEndings.get(result.endingTitle) ?? 0) + 1))
+    results.filter((result) => result.failureCause).forEach((result) => failureCauses.set(result.failureCause, (failureCauses.get(result.failureCause) ?? 0) + 1))
+    results.filter((result) => result.failureReason).forEach((result) => failureDetails.set(result.failureReason, (failureDetails.get(result.failureReason) ?? 0) + 1))
     return {
       strategy: label,
       runs,
@@ -122,24 +255,33 @@ try {
       reachedAlgalonRate: Number((results.filter((result) => result.cleared >= data.bosses.length - 1).length / runs).toFixed(3)),
       averageProgress: Number((results.reduce((sum, result) => sum + result.cleared, 0) / runs).toFixed(2)),
       endedByLeaveRate: Number((results.filter((result) => ['分崩离析', '组不到人', '臭名昭著'].includes(result.end)).length / runs).toFixed(3)),
+      anyLeaveRate: Number((results.filter((result) => result.anyLeave).length / runs).toFixed(3)),
+      ordinaryLeaveRate: Number((results.filter((result) => result.ordinaryLeave).length / runs).toFixed(3)),
+      collapseLeaveRate: Number((results.filter((result) => result.collapseLeave).length / runs).toFixed(3)),
+      internetCafeLeaveRate: Number((results.filter((result) => result.internetCafeLeave).length / runs).toFixed(3)),
+      averageDepartures: Number((results.reduce((sum, result) => sum + result.leaveCount, 0) / runs).toFixed(3)),
+      hiddenEndingRates: Object.fromEntries([...hiddenEndings.entries()].sort(([left], [right]) => left.localeCompare(right, 'zh-CN')).map(([title, count]) => [title, Number((count / runs).toFixed(3))])),
+      commonFailureCauses: [...failureCauses.entries()].sort((a, b) => b[1] - a[1]),
+      commonFailureDetails: [...failureDetails.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
       commonStops: [...stops.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
     }
   }
 
   const result = {
-    publicRecruitStrategy: sample('公开信息均衡选人', recruitLikePlayer, 1000),
-    strongCustomTeam: sample('高手全自建阵容', fixedTeam(strongCustom), 3000),
-    normalCustomTeam: sample('普通全自建阵容', fixedTeam(normalCustom), 3000),
-    weakCustomTeam: sample('较差全自建阵容', fixedTeam(weakCustom), 3000),
+    publicRecruitStrategy: sample('公开信息均衡选人', recruitLikePlayer, sampleRuns),
+    strongCustomTeam: sample('高手全自建阵容', fixedTeam(strongCustom), sampleRuns),
+    normalCustomTeam: sample('普通全自建阵容', fixedTeam(normalCustom), sampleRuns),
+    weakCustomTeam: sample('较差全自建阵容', fixedTeam(weakCustom), sampleRuns),
   }
 
   console.log(JSON.stringify(result, null, 2))
   const strong = result.strongCustomTeam
   const normal = result.normalCustomTeam
   const weak = result.weakCustomTeam
-  if (strong.fullClearRate < .22 || strong.fullClearRate > .28) process.exitCode = 1
-  if (normal.fullClearRate < .08 || normal.fullClearRate > .12) process.exitCode = 1
-  if (weak.fullClearRate < .015 || weak.fullClearRate > .025) process.exitCode = 1
+  if (strong.fullClearRate < .27 || strong.fullClearRate > .33) process.exitCode = 1
+  if (normal.fullClearRate < .07 || normal.fullClearRate > .13) process.exitCode = 1
+  if (weak.fullClearRate < .01 || weak.fullClearRate > .025) process.exitCode = 1
+  if ([strong, normal, weak].some((sample) => sample.anyLeaveRate < .3)) process.exitCode = 1
 } finally {
   await server.close()
 }

@@ -38,16 +38,27 @@
 
 - `Loot_Pool.csv`：装备名称、Boss、品质、适用职业、权重和参考价格。
 - `Raid_Buffs.csv`：职业/专精提供的团队 Buff、图标文件、战斗加成和说明。图标放在 `photo/buff/`，`icon_file` 必须与文件名完全一致。
+  - `physical_pct` / `caster_pct`：分别影响物理与法系输出。
+  - `melee_pct` / `ranged_pct`：分别影响近战与远程输出。
+  - `healing_pct`：影响治疗量。
+  - `power_bonus`：少量影响团队处理机制的综合能力。
 - `Game_Config.csv`：目前已直接接入的键包括：
   - `player_pool_size`
   - `initial_morale`
+  - `max_boss_attempts`
   - `wipe_morale_loss_1`
   - `wipe_morale_loss_2`
   - `wipe_morale_loss_3`
+  - `wipe_morale_loss_4`
   - `invalid_composition_fail_pct`（阵容门槛不满足时直接结构失败的概率，当前为 85）
   - `high_pot_leave_reduction`
   - `replacement_success_pct_1`
   - `replacement_success_pct_2`
+  - `replacement_success_pct_3`
+  - `replacement_success_pct_4`
+  - `universal_leave_floor_55`
+  - `universal_leave_floor_40`
+  - `universal_leave_floor_25`
   - `special_collapse_leave_pct`
   - `internet_cafe_leave_pct`
   - `special_wipe_event_pct`
@@ -56,6 +67,9 @@
   - `low_morale_power_penalty_40`
   - `low_morale_power_penalty_25`
   - `raid_buff_power_cap`
+  - `splus_start_price`
+  - `splus_reference_price`
+  - `splus_bid_cap_multiplier`
 
 `Game_Config.csv` 中其他历史键暂时仍主要用于说明，不能保证只改 CSV 就会影响运行逻辑。
 
@@ -63,12 +77,20 @@
 
 - 自建人物 A 批为 `P081`–`P102`，引荐人是 `P092`、`P082`、`P120`。
 - 自建人物 B 批为 `P103`–`P120`，引荐人是 `P083`、`P088`、`P091`、`P100`、`P096`、`P097`。
-- 第一次、第二次补人的单渠道成功率分别读取 `replacement_success_pct_1` 和 `replacement_success_pct_2`；A、B 两条渠道同时存在时各自独立判定。
-- 第三次退团不再补人；两条渠道同时存在时进入“臭名昭著”，否则进入“组不到人”。
+- 第一至第四次补人的单渠道成功率分别读取 `replacement_success_pct_1` 到 `replacement_success_pct_4`；A、B 两条渠道同时存在时各自独立判定，任一渠道成功即可进入补人页。
+- 第五次退团不再补人；两条渠道同时存在时进入“臭名昭著”，否则进入“组不到人”。前四次概率判定失败也会进入“组不到人”结局。
 - 多多虎或多多球喷人触发的“分崩离析”是隐藏直达结局，不进入补人流程。
 - 网吧到点事件只适用于愤怒月神和元素打击，概率读取 `internet_cafe_leave_pct`。
 
-补人名单会自动排除当前队员、本局已退团人员和没有可用专精数据的人物。批次范围和引荐人名单目前属于代码规则，修改这些名单仍需要改 `src/replacement.ts`；成功率可直接改 CSV。
+补人名单会自动排除当前队员、本局已退团人员和没有可用专精数据的人物，并保证候选人加入后，结合现有成员可切专精能够满足当前 Boss 的坦克、治疗和输出职责门槛。批次范围和引荐人名单目前属于代码规则，修改这些名单仍需要改 `src/replacement.ts`；成功率可直接改 CSV。
+
+## 拍卖与士气
+
+- S+ 默认读取 `splus_start_price`（当前 5,000G）和 `splus_reference_price`（当前 10,000G）。
+- S+ 最高承受价额外乘以 `splus_bid_cap_multiplier`（当前 1.5）；实际成交价仍会依据老板资金、消费类型、竞价激进度和竞价人数大幅波动。
+- S+竞价超过10,000G参考价后会使用500G或1,000G的大额加价档位，避免极品价格被低额加价轮数人为卡死。
+- S/S+ 高价成交会增加士气，S+价格越高，士气增幅越明显；普通 C/B 掉落会小幅降低士气。
+- 非简洁出价模板即使只写“继续”“+100”，页面也会自动附上该轮最终金额。约75%的出价直接显示简洁金额。
 
 ## 不建议直接维护
 

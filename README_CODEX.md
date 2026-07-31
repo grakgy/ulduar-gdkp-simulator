@@ -76,7 +76,7 @@ INIT
   -> RUNNING_BOSS
   -> AUCTION (Boss击杀)
   -> RUNNING_BOSS (下一Boss)
-  -> RESULT (三灭、退团散团、或通关)
+  -> RESULT (五次失败、补人失败、特殊散团、或通关)
 ```
 
 ## 5. 招募
@@ -166,17 +166,18 @@ roll > successRate+15               严重失败
 
 是否直接灭团由 `Boss_Events.hard_fail` 决定。软失败会累计死亡、治疗压力、输出损失或战复消耗。一个 Boss 内多个软失败可以形成连锁灭团。
 
-## 9. 三次尝试
+## 9. 五次尝试
 
 ```text
 第1次：熟练度 +0；灭团士气 -8
-第2次：熟练度 +4；灭团士气 -12
-第3次：熟练度 +7；失败后本局结束
+第2次：获得学习收益；灭团士气 -10
+第3次：继续获得学习收益；灭团士气 -15
+第4次：继续获得学习收益；灭团士气 -20
+第5次：最后一次尝试；失败后本局结束
 ```
 
-- Boss 剩余血量 <10%：士气损失减半，额外熟练度 +2。
-- Boss 剩余血量 >50%：所有人的退团率额外 +5%。
-- `learning` 高的人第二、第三把提升更明显。
+- Boss 剩余血量、当前士气、责任归属和个人退团倾向会共同影响退团概率。
+- `learning` 高的人后续尝试提升更明显。
 - 自信型、摆烂型的学习收益降低。
 
 ## 10. 社交、士气和退团
@@ -188,9 +189,9 @@ roll > successRate+15               严重失败
 3. 应用压力怪、气氛组、调解者、拱火者等士气影响。
 4. 更新个人下一把状态。
 5. 计算每人的退团率。
-6. 任意一人退团则直接散团。
+6. 有人退团后先按引荐渠道判定能否补人；特殊“分崩离析”直接散团。
 
-基础退团率：
+基础退团率会叠加：
 
 ```ts
 leaveRate = player.baseLeavePct
@@ -198,6 +199,7 @@ leaveRate = player.baseLeavePct
   + lowMoraleModifier
   + blamedModifier
   + traitModifier
+  + universalLowMoraleFloor
   + bossRemainingHpModifier
   + potModifier;
 
@@ -262,7 +264,7 @@ desireScore =
 
 ```ts
 maxBid = min(
-  wallet - reserveGold,
+  wallet,
   item.referencePrice * economyMultiplier * random(0.85, 1.15)
 );
 ```
@@ -292,7 +294,7 @@ netResult = share - personalSpending;
 - 按固定优先级判定的战局结局；判定逻辑和文案统一维护在 `src/endings.ts`。
 - 最终进度与止步 Boss。
 - 每个 Boss 的尝试次数。
-- 散团原因：三灭 / 某人退团 / 全通。
+- 结束原因：单 Boss 五次失败 / 退团后补人失败 / 特殊散团 / 全通。
 - 总金池、人均分金。
 - 每人的购买支出、分金、净收益。
 - 最贵装备、最大老板、最大排骨、最强打工、最大战犯、最大诈骗。

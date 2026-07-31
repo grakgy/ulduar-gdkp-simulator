@@ -1,9 +1,9 @@
 {
-  "version": "0.9.0-replacement-and-raid-buffs",
+  "version": "1.0.0-custom-c-and-hidden-endings",
   "seed": 380,
-  "player_count": 120,
-  "active_pool_size": 50,
-  "active_pool_model": "40 custom players plus 10 seeded random players",
+  "player_count": 131,
+  "active_pool_size": 56,
+  "active_pool_model": "all 51 custom players plus 5 seeded random players",
   "boss_count": 14,
   "loot_count": 118,
   "item_level_range": [
@@ -15,11 +15,14 @@
     "P081", "P082", "P083", "P084", "P085", "P086", "P087", "P088", "P089", "P090",
     "P091", "P092", "P093", "P094", "P095", "P096", "P097", "P098", "P099", "P100",
     "P101", "P102", "P103", "P104", "P105", "P106", "P107", "P108", "P109", "P110",
-    "P111", "P112", "P113", "P114", "P115", "P116", "P117", "P118", "P119", "P120"
+    "P111", "P112", "P113", "P114", "P115", "P116", "P117", "P118", "P119", "P120",
+    "P121", "P122", "P123", "P124", "P125", "P126", "P127", "P128", "P129", "P130",
+    "P131"
   ],
   "custom_batches": {
     "A": "P081-P102",
-    "B": "P103-P120"
+    "B": "P103-P120",
+    "C": "P121-P131"
   },
   "files": [
     "Auction_Rules.csv",
@@ -31,6 +34,7 @@
     "Economy_Types.csv",
     "Game_Config.csv",
     "Loot_Pool.csv",
+    "Player_Pool.csv",
     "Player_Specs.csv",
     "Players_Hidden.csv",
     "Players_Public.csv",
