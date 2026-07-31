@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { bosses, chatTemplates, combatLogTemplates, gameConfig, hiddenById, playersForSeed, publicById, type Boss, type CombatLogTemplate, type LootItem, type PublicPlayer } from './data'
 import { activeRaidBuffs, createMember, createPlayerStatus, currentSpec, dynamicItemLevel, itemReferencePrice, itemStartPrice, publicSpecs, rngFor, roleCounts, runAuction, shuffled, simulateCombat, type AuctionRecord, type CombatMeter, type CombatResult, type TeamMember } from './engine'
 import { markBossDecisionUsed, mergeCombatModifiers, resolveBossDecision, selectBossDecision, type BossDecision, type BossDecisionChoiceId, type BossDecisionResolution, type BossDecisionUsage } from './bossDecisionEvents'
@@ -304,7 +304,7 @@ function SpecSelector({ playerName, options, value, onChange }: { playerName: st
   return <div className="spec-selector" role="group" aria-label={`${playerName}的出战专精`}>
     {options.map((option) => {
       const selected = option.spec === value
-      return <button type="button" key={option.spec} className={`spec-option${selected ? ' selected' : ''}`} onClick={() => onChange(option.spec)} aria-pressed={selected} title={option.spec}>
+      return <button type="button" key={option.spec} className={`spec-option${selected ? ' selected' : ''}`} onClick={() => onChange(option.spec)} aria-label={option.spec} aria-pressed={selected} title={option.spec}>
         <SpecIcon spec={option.spec}/>
         <span>{option.spec}</span>
       </button>
@@ -850,6 +850,17 @@ function Preparation({ boss, team, morale, moraleLog, attempt, lastCombat, handl
   const counts = roleCounts(team)
   const modeLabel = boss.mode === '特殊' ? 'SPECIAL' : boss.hard_mode === '是' ? 'HARD MODE' : 'NORMAL'
   const buffs = activeRaidBuffs(team)
+  const [openBuffId, setOpenBuffId] = useState<string>()
+  const buffAreaRef = useRef<HTMLDivElement>(null)
+  const openBuff = buffs.find((buff) => buff.buff_id === openBuffId)
+  useEffect(() => {
+    if (!openBuffId) return
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!buffAreaRef.current?.contains(event.target as Node)) setOpenBuffId(undefined)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePress)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePress)
+  }, [openBuffId])
   return <section className="page scene-page boss-scene" style={bossSceneStyle(boss)}>
     <div className="boss-banner"><div><div className="eyebrow">BOSS {boss.order} / {bosses.length} · {modeLabel}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · {boss.design_note}</p></div><div className="attempt-badge"><span>下一次尝试</span><b>0{attempt}</b><small>/ 0{maxBossAttempts}</small></div></div>
     {lastCombat && !lastCombat.killed && <WipeReport result={lastCombat} morale={morale} handledDecision={handledDecision} />}
@@ -866,7 +877,7 @@ function Preparation({ boss, team, morale, moraleLog, attempt, lastCombat, handl
       <aside className="strategy-panel">
         <div className="panel-title"><span>阵容概览</span><b className={`morale-value morale-${moraleTone(morale)}`}>{morale}<small>士气</small></b></div>
         <div className="role-counts"><div><span><RoleMark role="坦克"/>坦克</span><b>{counts.坦克}</b></div><div><span><RoleMark role="治疗"/>治疗</span><b>{counts.治疗}</b></div><div><span><RoleMark role="近战DPS"/>近战</span><b>{counts.近战DPS}</b></div><div><span><RoleMark role="远程DPS"/>远程</span><b>{counts.远程DPS}</b></div></div>
-        <div className="raid-buffs"><b>团队增益</b><div>{buffs.map((buff) => <span key={buff.buff_id} title={`${buff.buff_name}：${buff.description}`}><img src={buffIconModules[`../photo/buff/${buff.icon_file}`]} alt=""/><small>{buff.buff_name}</small></span>)}</div></div>
+        <div className="raid-buffs"><b>团队增益</b><div ref={buffAreaRef}>{buffs.map((buff) => <button type="button" className="raid-buff" key={buff.buff_id} title={`${buff.buff_name}：${buff.description}`} aria-expanded={openBuffId === buff.buff_id} onClick={() => setOpenBuffId((current) => current === buff.buff_id ? undefined : buff.buff_id)}><img src={buffIconModules[`../photo/buff/${buff.icon_file}`]} alt=""/><small>{buff.buff_name}</small></button>)}{openBuff && <div className="raid-buff-popover" role="dialog" aria-label={`${openBuff.buff_name}效果`}><button type="button" aria-label="关闭" onClick={() => setOpenBuffId(undefined)}>×</button><span><img src={buffIconModules[`../photo/buff/${openBuff.icon_file}`]} alt=""/><b>{openBuff.buff_name}</b><small>{openBuff.provider_spec || openBuff.provider_class}</small></span><p>{openBuff.description}</p></div>}</div></div>
         <MoraleHistory entries={moraleLog} limit={4} compact/>
         <div className="checks"><b>关键检定</b>{boss.key_checks.split('|').map((check) => <span key={check}>◆ {check}</span>)}</div>
         <button className="primary battle-button" onClick={onAttempt}>开始第 {attempt} 次尝试 <span>→</span></button>

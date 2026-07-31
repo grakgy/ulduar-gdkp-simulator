@@ -178,10 +178,18 @@ main { min-height: calc(100vh - 76px); }
 .role-counts b { color: var(--paper); font: 700 24px 'Roboto Condensed'; }
 .raid-buffs { padding: 14px 18px; border-top: 1px solid var(--line); }
 .raid-buffs > b { display: block; margin-bottom: 9px; color: #777970; font-size: 10px; }
-.raid-buffs > div { display: flex; flex-wrap: wrap; gap: 7px; }
-.raid-buffs span { width: 34px; position: relative; display: grid; justify-items: center; gap: 3px; }
+.raid-buffs > div { position: relative; display: flex; flex-wrap: wrap; gap: 7px; }
+.raid-buff { width: 34px; position: relative; display: grid; justify-items: center; gap: 3px; padding: 0; color: inherit; border: 0; background: none; cursor: pointer; }
 .raid-buffs img { width: 30px; height: 30px; object-fit: cover; border: 1px solid #6f5b31; box-shadow: 0 0 10px #d9a74b18; }
 .raid-buffs small { width: 42px; color: #777970; font-size: 7px; white-space: nowrap; overflow: hidden; text-align: center; text-overflow: ellipsis; }
+.raid-buff:hover img, .raid-buff[aria-expanded='true'] img { border-color: #d7aa4d; box-shadow: 0 0 14px #d9a74b55; }
+.raid-buffs .raid-buff-popover { width: min(260px, calc(100vw - 54px)); position: absolute; right: 0; top: calc(100% + 10px); z-index: 30; display: block; padding: 13px 15px; color: #d7d4c8; border: 1px solid #80642f; background: linear-gradient(145deg, #211b10, #11130f 72%); box-shadow: 0 14px 35px #000c, 0 0 18px #d9a74b1f; }
+.raid-buff-popover > button { position: absolute; right: 7px; top: 6px; padding: 2px 6px; color: #8e8878; border: 0; background: none; cursor: pointer; }
+.raid-buff-popover > span { width: auto; display: grid; grid-template-columns: 34px 1fr; grid-template-rows: auto auto; gap: 1px 9px; justify-items: start; align-items: center; }
+.raid-buff-popover > span img { width: 34px; height: 34px; grid-row: 1 / 3; }
+.raid-buff-popover > span b { padding-right: 20px; color: var(--gold-light); font-size: 12px; }
+.raid-buff-popover > span small { width: auto; color: #817b6d; font-size: 8px; }
+.raid-buff-popover p { margin: 10px 0 0; color: #bbb7aa; font-size: 10px; line-height: 1.6; }
 .checks { display: grid; gap: 8px; padding: 15px 18px; border-top: 1px solid var(--line); }
 .checks b { color: #777970; font-size: 10px; margin-bottom: 3px; }
 .checks span { color: #aaa99f; font-size: 11px; }
@@ -635,7 +643,9 @@ main { min-height: calc(100vh - 76px); }
   .topbar { padding: 0 3vw; }
   .brand { gap: 8px; }
   .brand small { display: none; }
-  .header-stats { display: none; }
+  .header-stats { display: flex; gap: 0; }
+  .header-stats span { display: none; }
+  .header-stats span:first-child { display: inline-flex; align-items: center; font-size: 10px; white-space: nowrap; }
   .page { width: 94vw; padding-top: 26px; padding-bottom: 54px; }
   .page-heading h2, .boss-banner h2 { font-size: 36px; }
   .page-heading, .boss-banner { gap: 16px; margin-bottom: 22px; }
@@ -663,16 +673,16 @@ main { min-height: calc(100vh - 76px); }
   .morale-history-list > div { grid-template-columns: 1fr auto auto; }
   .morale-history-list p { grid-column: 1 / -1; grid-row: 2; }
   .table-head { display: none; }
-  .team-row { min-height: 96px; padding: 12px; grid-template-columns: 1fr auto; grid-template-areas: 'member ilvl' 'spec spec'; gap: 10px 12px; }
+  .team-row { min-height: 72px; padding: 10px 12px; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: 'member spec ilvl'; gap: 8px; }
   .team-row .member-name { grid-area: member; min-width: 0; }
   .team-row > strong { grid-area: ilvl; align-self: start; }
-  .team-row .spec-selector { grid-area: spec; width: 100%; flex-wrap: wrap; }
-  .team-row .spec-option { min-width: 58px; min-height: 58px; flex: 1 1 58px; }
-  .team-row .spec-option img, .team-row .spec-icon-fallback { width: 34px; height: 34px; }
-  .team-row .spec-option > span:last-child { max-width: 72px; font-size: 9px; }
+  .team-row .spec-selector { grid-area: spec; width: auto; flex-wrap: nowrap; gap: 4px; }
+  .team-row .spec-option { width: 34px; min-width: 34px; min-height: 38px; padding: 2px; flex: 0 0 34px; }
+  .team-row .spec-option img, .team-row .spec-icon-fallback { width: 27px; height: 27px; }
+  .team-row .spec-option > span:last-child { display: none; }
   .member-name span { min-width: 0; display: grid; gap: 2px; }
   .member-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .raid-buffs span { width: 42px; }
+  .raid-buff { width: 42px; }
   .raid-buffs img { width: 36px; height: 36px; }
   .raid-buffs small { width: 46px; font-size: 8px; }
   .replacement-departure { margin-top: 0; }
