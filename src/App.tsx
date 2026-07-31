@@ -897,11 +897,18 @@ function CombatPlayback({ boss, result, onComplete }: { boss: Boss; result: Comb
   const finaleCategory: CombatLogTemplate['category'] = result.killed
     ? deaths.length ? 'kill_deaths' : 'kill'
     : hasFatalEvent ? 'wipe_fatal' : (result.casualties ?? 0) > 0 || deaths.length ? 'wipe_attrition' : 'wipe_enrage'
+  const nonEventWipeFinale = result.failureCause === '机制失误'
+    ? `机制链在${boss.boss_name}剩余${result.remainingHp}%时断掉，团队随即灭团。`
+    : result.failureCause === '治疗不足'
+      ? `治疗资源在${boss.boss_name}剩余${result.remainingHp}%时耗尽，团队没能撑住下一轮。`
+      : result.failureCause === '阵容失衡'
+        ? `职责配置无法继续支撑战斗，团队在${boss.boss_name}剩余${result.remainingHp}%时灭团。`
+        : combatCopy(finaleCategory, copyRng, variables)
   const finale = !result.killed && responsibleEvent
     ? fatalEvent
       ? `${responsibleEvent.responsible ? `${responsibleEvent.responsible}未能处理` : ''}${responsibleEvent.name}，团队随即灭团。`
       : `${responsibleEvent.responsible}在${responsibleEvent.name}中出现险情，团队后续没能稳住。`
-    : combatCopy(finaleCategory, copyRng, variables)
+    : result.killed ? combatCopy(finaleCategory, copyRng, variables) : nonEventWipeFinale
   return <section className="page combat-page scene-page boss-scene" style={finished && result.killed ? bossLootSceneStyle(boss) : bossSceneStyle(boss)}><div className="combat-heading"><div><div className="eyebrow">LIVE COMBAT LOG · ATTEMPT {result.attempt}</div><h2>{boss.boss_name}</h2><p>{boss.mode} · 重要事件实时记录</p></div><div className="boss-health"><span>Boss 血量</span><b>{bossHp}%</b><i><em style={{ width: `${bossHp}%` }} /></i></div></div><div className="combat-console"><div className="console-top"><span>战斗记录</span><small>{finished ? `战斗时长 ${formatTime(result.duration)}` : '战斗进行中…'}</small></div><div className="log-line opening visible"><time>0:00</time><i>◆</i><div><b>战斗开始</b><p>{opening}</p></div></div>{result.events.map((event, index) => { const visible = step > index; const time = result.duration * (event.timeRatio ?? (index + 1) / (result.events.length + 1)); return <div key={`${event.name}-${index}`} className={`log-line ${event.status} ${visible ? 'visible' : ''}`}><time>{formatTime(time)}</time><i>{event.status === '成功' ? '✓' : event.status === '险情' ? '!' : '×'}</i><div><b>{event.name}</b><p>{event.detail}{event.responsible ? ` · 责任人：${event.responsible}` : ''}{event.recovery ? <><br/><span className="event-recovery">补救：{event.recovery}</span></> : null}</p></div><em>{event.status}</em></div> })}{finished && <div className={`log-line finale visible ${result.killed ? '成功' : '失败'}`}><time>{formatTime(result.duration)}</time><i>{result.killed ? '✓' : '×'}</i><div><b>{finale}</b><p>{result.reason}</p></div><em>{result.killed ? '击杀' : '灭团'}</em></div>}</div>{finished ? <><FightStatsStrip result={result}/><CombatMeters meters={result.meters}/><div className="combat-actions"><span>{result.killed ? '战斗统计已记账，接下来看看谁愿意为紫色像素上头。' : '锅已经写进战斗记录，回去还能重新排职责。'}</span><button className="primary large" onClick={onComplete}>{result.killed ? '进入掉落拍卖' : '结算本次灭团'} <b>→</b></button></div></> : <div className="combat-progress"><span style={{ width: `${step / totalSteps * 100}%` }}/><button onClick={() => setStep(totalSteps)}>展开完整记录</button></div>}</section>
 }
 
