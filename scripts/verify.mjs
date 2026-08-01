@@ -122,24 +122,32 @@ try {
   ]
   const strongHealerIds = healerCandidates.slice(0, 2).map((player) => player.player_id)
   const weakHealerIds = healerCandidates.slice(-2).map((player) => player.player_id)
+  const weakThreeHealerIds = healerCandidates.slice(-3).map((player) => player.player_id)
+  const threeHealerCoreIds = ['P092', 'P083', 'P105', 'P120', 'P128', 'P084', 'P103']
   let strongHealerKills = 0
   let weakHealerKills = 0
+  let weakThreeHealerKills = 0
   for (let sampleSeed = 1; sampleSeed <= 200; sampleSeed += 1) {
     const strongTeam = [...fixedCore.map((player) => player.player_id), ...strongHealerIds].map((id) => engine.createMember(id, `heal-strong-${sampleSeed}`))
     const weakTeam = [...fixedCore.map((player) => player.player_id), ...weakHealerIds].map((id) => engine.createMember(id, `heal-weak-${sampleSeed}`))
+    const weakThreeHealerTeam = [...threeHealerCoreIds, ...weakThreeHealerIds].map((id) => engine.createMember(id, `heal-weak-three-${sampleSeed}`))
     if (engine.simulateCombat(`heal-${sampleSeed}`, data.bosses[10], 2, strongTeam, 74, 0).killed) strongHealerKills += 1
     if (engine.simulateCombat(`heal-${sampleSeed}`, data.bosses[10], 2, weakTeam, 74, 0).killed) weakHealerKills += 1
+    if (engine.simulateCombat(`heal-three-${sampleSeed}`, data.bosses[10], 2, weakThreeHealerTeam, 74, 0).killed) weakThreeHealerKills += 1
   }
   const healerSkillMatters = strongHealerKills >= weakHealerKills + 20
+  const threeHealerResponseWorks = weakThreeHealerKills > weakHealerKills
 
   const sampledSales = []
   const sampledRecords = []
   let highPremiumMoraleObserved = false
+  let maxAuctionMorale = Number.NEGATIVE_INFINITY
   for (let sampleSeed = 1; sampleSeed <= 60; sampleSeed += 1) {
     const sampleOrder = engine.shuffled(data.playersPublic, String(sampleSeed))
     const sampleTeam = sampleOrder.slice(0, 10).map((player) => engine.createMember(player.player_id, String(sampleSeed)))
     for (const boss of data.bosses) {
       const auctionResult = engine.runAuction(String(sampleSeed), boss, sampleTeam)
+      maxAuctionMorale = Math.max(maxAuctionMorale, auctionResult.moraleDelta)
       const records = auctionResult.records
       sampledRecords.push(...records)
       sampledSales.push(...records.filter((record) => !record.salvaged))
@@ -444,6 +452,15 @@ try {
     usage: { run: [], boss: {} },
   })).every((decision) => decision?.id !== 'data')
   const roleAwareDataDecisionValid = dpsDataDecisionObserved && healerDataDecisionBlocked && tankDataDecisionBlocked
+  const protectedEventDeparture = app.buildBossDecisionDeparture(combatA, { action: 'leave', leaverId: 'P096', responsibleId: 'P095' })
+  const eventDepartureDoesNotCollapse = protectedEventDeparture.leaveType === '开喷退团'
+    && protectedEventDeparture.leaver === 'P096'
+    && !protectedEventDeparture.leaveReason.includes('分崩离析')
+  const shortRestSamples = Array.from({ length: 10000 }, (_, index) => engine.shortRestMoraleRecovery(`short-rest-${index}`, 'B08', 3, 20, false))
+  const shortRestRate = shortRestSamples.filter((delta) => delta === 5).length / shortRestSamples.length
+  const shortRestRecoveryValid = shortRestRate >= .085 && shortRestRate <= .115
+    && engine.shortRestMoraleRecovery('short-rest-blocked', 'B08', 3, 21, false) === 0
+    && engine.shortRestMoraleRecovery('short-rest-used', 'B08', 3, 20, true) === 0
   const newDecisionEventsValid = ['全团较劲', '有人不服', '发现划水'].every((tag) => dataTags.has(tag))
     && ['庆祝成功', '选曲翻车'].every((tag) => celebrationTags.has(tag))
     && ['确实好用', '宏不好用', '宏崩溃'].every((tag) => macroTags.has(tag))
@@ -792,7 +809,9 @@ try {
     wipeMoraleConfigValid,
     strongHealerKills,
     weakHealerKills,
+    weakThreeHealerKills,
     healerSkillMatters,
+    threeHealerResponseWorks,
     sampledSales: sampledSales.length,
     basePriceRate: Number(basePriceRate.toFixed(3)),
     whaleRate: Number(whaleRate.toFixed(3)),
@@ -802,6 +821,7 @@ try {
     splusPeakRatio: Number(splusPeakRatio.toFixed(3)),
     reserveGoldRemoved,
     highPremiumMoraleObserved,
+    maxAuctionMorale,
     multiRoundAuctions,
     bidIncrements: [...bidIncrements].sort((a, b) => a - b),
     strictlyIncreasingBids,
@@ -859,6 +879,9 @@ try {
     customBatchDFullyPlayable,
     newDecisionEventsValid,
     roleAwareDataDecisionValid,
+    eventDepartureDoesNotCollapse,
+    shortRestRate: Number(shortRestRate.toFixed(3)),
+    shortRestRecoveryValid,
     p132LeaderTraitActive,
     caiFamilyProfilesValid,
     atmosphereRosterValid,
@@ -917,7 +940,7 @@ try {
     leaveNarrativeTypes: [...leaveNarrativeTypes],
   }
   console.log(JSON.stringify(result, null, 2))
-  if (result.players !== 58 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || !result.playerStatusSystemValid || !result.auctionBuyerDistributionValid || result.priceTiers.join(',') !== '200,500,1000,2000,5000' || result.splusReferencePrice !== 10000 || result.splusPeakRatio < 2 || !result.reserveGoldRemoved || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.bugOutcomeDistributionValid || !result.structureFailuresAssignedToLeader || !result.strictCompositionValid || !result.wipeMoraleConfigValid || !result.healerSkillMatters || result.basePriceRate < .18 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || !result.highPremiumMoraleObserved || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.targetedChatTemplatesValid || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.matchedPersonalFailureChatValid || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.customBatchCFullyPlayable || !result.customBatchDFullyPlayable || !result.newDecisionEventsValid || !result.roleAwareDataDecisionValid || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.directHiddenEventConfigValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.battleResLimitedToOne || !result.onlyDruidsBattleResOthers || !result.shamanSelfResObserved || !result.warlockSelfResObserved || !result.tankDeathStopsCombat || !result.throughputGateValid || !result.killMoraleRangeValid || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseFirstAttemptObserved !== 0 || result.specialCollapseObserved < 1 || result.specialCollapseRate < .4 || result.specialCollapseRate > .7 || !result.specialLeaveRatesValid || !result.replacementSystemValid || !result.tigerCanActuallyLeave || !result.raidBuffConfigValid || !result.specialWipeEventsValid || !result.anonymousFailureChatValid || !result.responsibilityAwareChatValid || !result.targetedShortageChatValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.fifthAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
+  if (result.players !== 58 || result.bosses !== 14 || !result.deterministicCombat || !result.deterministicAuction || result.drops !== 2 || result.meters !== 10 || !result.teamDpsRecorded || !result.playerStatusSystemValid || !result.auctionBuyerDistributionValid || result.priceTiers.join(',') !== '200,500,1000,2000,5000' || result.splusReferencePrice !== 10000 || result.splusPeakRatio < 2 || !result.reserveGoldRemoved || !result.fullLootCoverage || result.firstAttemptKills >= 14 || !result.bugOutcomeDistributionValid || !result.structureFailuresAssignedToLeader || !result.strictCompositionValid || !result.wipeMoraleConfigValid || !result.healerSkillMatters || !result.threeHealerResponseWorks || result.basePriceRate < .18 || result.basePriceRate > .55 || result.whaleRate > .16 || result.unsoldRate < .05 || result.unsoldRate > .18 || result.premiumReferenceRate < .35 || result.premiumMedianRatio < .8 || !result.highPremiumMoraleObserved || result.maxAuctionMorale !== 15 || result.multiRoundAuctions < 10 || result.dynamicMultiBidAuctions < 10 || result.midAuctionExits < 10 || result.lateAuctionJoins < 10 || result.compactBidRate < .7 || result.compactBidRate > .8 || !result.noEmptyFollow || !result.soldAuctionsCountDown || !result.bidIncrements.includes(200) || !result.bidIncrements.includes(500) || !result.strictlyIncreasingBids || !result.noSelfBidding || !result.noDiscounts || !result.auctionTemplatesUsed || !result.customPlayersPreserved || !result.newCustomPlayersActive || !result.customPlayersBalanced || !result.hiddenSchemaOrganized || !result.chatTemplateCoverage || !result.targetedChatTemplatesValid || !result.combatLogTemplatesValid || !result.customChatTraitsCovered || !result.attemptLearningWorks || !result.requestedSpecChangesValid || !result.publicEconomyClaimsValid || !result.damageBalanceValid || !result.quietPlayerRespected || !result.matchedPersonalFailureChatValid || !result.franCanBeRecovered || !result.itemLevelAdjustmentsValid || result.itemLevel230Rate > .08 || result.itemLevel232Rate > .02 || !result.publicInfoConsistent || !result.unpickedReturnToPool || !result.dynamicPoolValid || !result.princeFullyPlayable || !result.lemonFullyPlayable || !result.customBatchBFullyPlayable || !result.customBatchCFullyPlayable || !result.customBatchDFullyPlayable || !result.newDecisionEventsValid || !result.roleAwareDataDecisionValid || !result.eventDepartureDoesNotCollapse || !result.shortRestRecoveryValid || !result.caiFamilyProfilesValid || !result.atmosphereRosterValid || !result.endingConfigComplete || !result.endingPriorityValid || !result.directHiddenEventConfigValid || !result.payoutEligibilityValid || !result.permanentDeathCanKill || !result.battleResAccountingWorks || !result.battleResLimitedToOne || !result.onlyDruidsBattleResOthers || !result.shamanSelfResObserved || !result.warlockSelfResObserved || !result.tankDeathStopsCombat || !result.throughputGateValid || !result.killMoraleRangeValid || result.firstWipeDisbandRate > .12 || !result.glassHeartChatValid || result.specialCollapseFirstAttemptObserved !== 0 || result.specialCollapseObserved < 1 || result.specialCollapseRate < .4 || result.specialCollapseRate > .7 || !result.specialLeaveRatesValid || !result.replacementSystemValid || !result.tigerCanActuallyLeave || !result.raidBuffConfigValid || !result.specialWipeEventsValid || !result.anonymousFailureChatValid || !result.responsibilityAwareChatValid || !result.targetedShortageChatValid || result.wipeChatVariants < 3 || result.recoveryCoverage !== 1 || result.namedRecoveryCoverage !== 1 || !result.fatalEventsStopCombat || result.fifthAttemptLeavers !== 0 || result.leaveNarrativeTypes.length < 3) process.exitCode = 1
 } finally {
   await server.close()
 }

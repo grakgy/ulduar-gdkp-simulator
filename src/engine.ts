@@ -128,6 +128,11 @@ export function rngFor(...parts: Array<string | number>) {
   return mulberry32(hashSeed(parts.join('|')))
 }
 
+export function shortRestMoraleRecovery(seed: string, bossId: string, attempt: number, morale: number, alreadyUsed: boolean): number {
+  if (alreadyUsed || morale > 20) return 0
+  return rngFor(seed, bossId, attempt, 'short-rest-recovery')() < .1 ? 5 : 0
+}
+
 export function createPlayerStatus(seed: string, playerId: string): PlayerStatusSnapshot {
   const rng = rngFor(seed, playerId, 'player-status')
   return createPlayerStatusSnapshot(rng(), rng(), rng())
@@ -1178,7 +1183,17 @@ export function simulateCombat(seed: string, boss: Boss, attempt: number, team: 
     B08: 45500, B09: 45500, B10: 47500, B11: 49500, B12: 49500, B13: 52000, B14: 54500,
   }
   const requiredTeamDps = requiredDpsByBoss[boss.boss_id] ?? 42000
-  const requiredTeamHps = boss.tank_mode === '载具' ? 0 : ({ 低: 7000, 中: 8200, 高: 9800, 极高: 11000 } as const)[boss.healing_pressure]
+  const requiredHpsByBoss: Record<string, number> = {
+    B05: 11500,
+    B10: 12000,
+    B11: 12000,
+    B12: 10500,
+    B13: 12000,
+    B14: 12500,
+  }
+  const requiredTeamHps = boss.tank_mode === '载具'
+    ? 0
+    : requiredHpsByBoss[boss.boss_id] ?? ({ 低: 7000, 中: 8200, 高: 9800, 极高: 11000 } as const)[boss.healing_pressure]
   const dpsFailure = teamDps < requiredTeamDps
   const hpsFailure = requiredTeamHps > 0 && teamHps < requiredTeamHps
   const dpsCoverage = teamDps / Math.max(requiredTeamDps, 1)
@@ -1949,13 +1964,17 @@ export function runAuction(seed: string, boss: Boss, team: TeamMember[]): { reco
         moraleReasons.push(`${item.item_name}是极品却流拍或卖得太低`)
       } else {
         const highPriceGain = item.grade === 'S+'
-          ? price >= reference * 1.6 ? 5 : price >= reference * 1.2 ? 4 : 3
-          : price >= reference * 1.4 ? 3 : 2
+          ? price >= reference * 1.6 ? 15 : price >= reference * 1.2 ? 10 : 6
+          : price >= reference * 1.4 ? 6 : 3
         moraleDelta += highPriceGain
         moraleReasons.push(`${item.item_name}以${price}G成交，极品高价让全团士气提升${highPriceGain}点`)
       }
     }
-    if (price >= reference) {
+    if (item.grade === 'A' && !salvaged && price >= reference * 1.2) {
+      moraleDelta += 2
+      moraleReasons.push(`${item.item_name}高于参考价成交，团队士气提升2点`)
+    }
+    if (price >= reference && ['C', 'B'].includes(item.grade)) {
       moraleDelta += 1
       moraleReasons.push(`${item.item_name}拍到参考价以上`)
     }
@@ -1965,7 +1984,7 @@ export function runAuction(seed: string, boss: Boss, team: TeamMember[]): { reco
     }
     records.push({ bossId: boss.boss_id, bossName: boss.boss_name, item, bids, buyerId: buyer?.playerId, buyerName: buyer?.name, price, salvaged, log, lateJoiners, exitCount })
   }
-  return { records, team: nextTeam, potGain, moraleDelta: clamp(moraleDelta, -4, 6), moraleReasons }
+  return { records, team: nextTeam, potGain, moraleDelta: clamp(moraleDelta, -4, 15), moraleReasons }
 }
 
 export function createMember(id: string, seed = '380', status = createPlayerStatus(seed, id)): TeamMember {

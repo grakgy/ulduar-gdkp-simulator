@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bosses, chatTemplates, combatLogTemplates, gameConfig, hiddenById, playersForSeed, publicById, type Boss, type CombatLogTemplate, type LootItem, type PublicPlayer } from './data'
-import { activeRaidBuffs, createMember, createPlayerStatus, currentSpec, dynamicItemLevel, itemReferencePrice, itemStartPrice, publicSpecs, rngFor, roleCounts, runAuction, shuffled, simulateCombat, type AuctionRecord, type CombatMeter, type CombatResult, type TeamMember } from './engine'
+import { activeRaidBuffs, createMember, createPlayerStatus, currentSpec, dynamicItemLevel, itemReferencePrice, itemStartPrice, publicSpecs, rngFor, roleCounts, runAuction, shortRestMoraleRecovery, shuffled, simulateCombat, type AuctionRecord, type CombatMeter, type CombatResult, type TeamMember } from './engine'
 import { markBossDecisionUsed, mergeCombatModifiers, resolveBossDecision, selectBossDecision, type BossDecision, type BossDecisionChoiceId, type BossDecisionResolution, type BossDecisionUsage } from './bossDecisionEvents'
 import { resolveRunEnding } from './endings'
 import type { PlayerStatusSnapshot } from './playerStatus'
@@ -212,6 +212,20 @@ export function publicWhisper(player: PublicPlayer, seed: string, round: number)
     return normalized
   }).filter(Boolean)
   return options[Math.floor(rng() * options.length)] ?? (pureDps ? '1' : `${player.signup_spec} 熟练`)
+}
+
+export function buildBossDecisionDeparture(lastCombat: CombatResult, resolution: BossDecisionResolution): CombatResult {
+  const leaverId = resolution.leaverId!
+  const leaverName = publicById.get(leaverId)?.name ?? '一名成员'
+  const roasterName = publicById.get(resolution.responsibleId ?? '')?.name ?? '压力怪'
+  return {
+    ...lastCombat,
+    responsible: resolution.responsibleId ?? '',
+    leaver: leaverId,
+    leaveType: '开喷退团',
+    leaveReason: `${roasterName}当众施压后，${leaverName}心态崩溃并直接离开团队。`,
+    chat: [...(lastCombat.chat ?? []), `${roasterName}：你这装等就打成这样？`, `${leaverName}：行，我不打了。`, `系统：${leaverName} 离开了团队。`],
+  }
 }
 
 function classStyle(className: string) {
@@ -467,9 +481,28 @@ function App() {
     const oldHistory = prev.histories.find((h) => h.bossId === currentBoss.boss_id)
     const history: BossHistory = { bossId: currentBoss.boss_id, attempts: attempt, killed: result.killed, results: [...(oldHistory?.results ?? []), result] }
     const histories = [...prev.histories.filter((h) => h.bossId !== currentBoss.boss_id), history]
-    const morale = Math.max(0, Math.min(100, prev.morale + result.moraleDelta))
+    let morale = Math.max(0, Math.min(100, prev.morale + result.moraleDelta))
     const combatMorale: MoraleEntry = { id: `${currentBoss.boss_id}-${attempt}-combat`, bossName: currentBoss.boss_name, source: '战斗', delta: result.moraleDelta, before: prev.morale, after: morale, reason: result.moraleReason }
-    const moraleLog = [...(prev.moraleLog ?? []), combatMorale]
+    let moraleLog = [...(prev.moraleLog ?? []), combatMorale]
+    let wipeDecision: BossDecision | undefined
+    if (!result.killed && !result.leaver && attempt < maxBossAttempts) {
+      wipeDecision = selectBossDecision({
+        seed: prev.seed,
+        boss: currentBoss,
+        attempt: attempt + 1,
+        team: activeTeam(team),
+        morale,
+        lastCombat: result,
+        usage: prev.decisionUsage,
+      })
+      const restLogId = `${currentBoss.boss_id}-short-rest`
+      const restDelta = wipeDecision ? 0 : shortRestMoraleRecovery(prev.seed, currentBoss.boss_id, attempt, morale, moraleLog.some((entry) => entry.id === restLogId))
+      if (restDelta) {
+        const beforeRest = morale
+        morale = Math.min(100, morale + restDelta)
+        moraleLog = [...moraleLog, { id: restLogId, bossName: currentBoss.boss_name, source: '事件', delta: restDelta, before: beforeRest, after: morale, reason: '团长让全团短暂休整，重新整理状态后再开怪' }]
+      }
+    }
     if (result.leaver && result.leaveType === '分崩离析') {
       team = team.map((member) => member.id === result.leaver ? { ...member, left: true } : member)
       const leaveCount = (prev.leaveCount ?? 0) + 1
@@ -495,15 +528,6 @@ function App() {
       return { ...prev, team, histories, bossAttempts: attempt, morale, moraleLog, leaveCount, lastCombat: result, pendingCombat: undefined, pendingReplacement: decision.plan, phase: 'replacement', endReason: '' }
     }
     if (!result.killed) {
-      const decision = selectBossDecision({
-        seed: prev.seed,
-        boss: currentBoss,
-        attempt: attempt + 1,
-        team: activeTeam(team),
-        morale,
-        lastCombat: result,
-        usage: prev.decisionUsage,
-      })
       return {
         ...prev,
         team,
@@ -513,9 +537,9 @@ function App() {
         moraleLog,
         lastCombat: result,
         pendingCombat: undefined,
-        pendingDecision: decision,
+        pendingDecision: wipeDecision,
         decisionResolution: undefined,
-        phase: decision ? 'decision' : 'prep',
+        phase: wipeDecision ? 'decision' : 'prep',
       }
     }
     if (!prev.pendingTechEnding) {
@@ -639,24 +663,9 @@ function App() {
     }
     if (resolution.action === 'leave' && resolution.leaverId) {
       const leaverId = resolution.leaverId
-      const leaverName = publicById.get(leaverId)?.name ?? '一名成员'
-      const roasterName = publicById.get(resolution.responsibleId ?? '')?.name ?? '压力怪'
-      const protectedPolicy = hiddenById.get(leaverId)?.leave_policy === '永不主动退队'
-      const departure: CombatResult = {
-        ...(prev.lastCombat!),
-        responsible: resolution.responsibleId ?? '',
-        leaver: leaverId,
-        leaveType: protectedPolicy ? '分崩离析' : '开喷退团',
-        leaveReason: protectedPolicy
-          ? `${roasterName}当众施压把${leaverName}喷到退团，团队频道随即彻底失控，本局直接分崩离析。`
-          : `${roasterName}当众施压后，${leaverName}心态崩溃并直接离开团队。`,
-        chat: [...(prev.lastCombat?.chat ?? []), `${roasterName}：你这装等就打成这样？`, `${leaverName}：行，我不打了。`, `系统：${leaverName} 离开了团队。`],
-      }
+      const departure = buildBossDecisionDeparture(prev.lastCombat!, resolution)
       const team = prev.team.map((member) => member.id === leaverId ? { ...member, left: true } : member)
       const leaveCount = prev.leaveCount + 1
-      if (protectedPolicy) {
-        return { ...prev, team, leaveCount, lastCombat: departure, pendingDecision: undefined, decisionResolution: undefined, phase: 'result', endReason: '成员退团散团' }
-      }
       const replacement = replacementDecision(prev.seed, currentBoss.boss_id, prev.bossAttempts, leaveCount, leaverId, team, 'prep')
       if (!replacement.plan) {
         return {

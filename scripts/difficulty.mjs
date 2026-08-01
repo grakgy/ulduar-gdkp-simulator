@@ -215,6 +215,7 @@ try {
       team = adaptSpecsForBoss(team, boss)
       currentBossId = boss.boss_id
       let killed = false
+      let shortRestUsed = false
       for (let attempt = 1; attempt <= maxBossAttempts; attempt += 1) {
         const result = engine.simulateCombat(seed, boss, attempt, activeTeam(), morale, pot)
         lastFailureCause = result.failureCause
@@ -232,6 +233,11 @@ try {
           return finish('成员退团散团', boss.boss_name)
         }
         if (!result.killed) {
+          const restDelta = engine.shortRestMoraleRecovery(seed, boss.boss_id, attempt, morale, shortRestUsed)
+          if (restDelta) {
+            morale = Math.min(100, morale + restDelta)
+            shortRestUsed = true
+          }
           const directEnding = runEvents.hiddenEndingAfterWipe(seed, morale, pot, cleared, cumulativeWipes())
           if (directEnding) return finish(directEnding.reason, boss.boss_name)
           if (attempt >= maxBossAttempts) return finish('五灭', boss.boss_name)
