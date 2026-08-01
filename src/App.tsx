@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bosses, chatTemplates, combatLogTemplates, gameConfig, hiddenById, playersForSeed, publicById, type Boss, type CombatLogTemplate, type LootItem, type PublicPlayer } from './data'
 import { activeRaidBuffs, createMember, createPlayerStatus, currentSpec, dynamicItemLevel, itemReferencePrice, itemStartPrice, publicSpecs, rngFor, roleCounts, runAuction, shortRestMoraleRecovery, shuffled, simulateCombat, type AuctionRecord, type CombatMeter, type CombatResult, type TeamMember } from './engine'
-import { markBossDecisionUsed, mergeCombatModifiers, resolveBossDecision, selectBossDecision, type BossDecision, type BossDecisionChoiceId, type BossDecisionResolution, type BossDecisionUsage } from './bossDecisionEvents'
+import { markBossDecisionUsed, mergeCombatModifiers, resolveBossDecision, selectBossDecision, type BossDecision, type BossDecisionChoiceId, type BossDecisionOutcomeStage, type BossDecisionResolution, type BossDecisionUsage } from './bossDecisionEvents'
 import { resolveRunEnding } from './endings'
 import type { PlayerStatusSnapshot } from './playerStatus'
 import { replacementDecision, type ReplacementPlan } from './replacement'
@@ -847,8 +847,12 @@ function BossDecisionPage({ boss, decision, resolution, onChoose, onContinue }: 
         {target && <><span className="decision-arrow">→</span><div className="decision-person target" style={classStyle(target.class)}><ClassIcon wowClass={target.class}/><span><small>被点名成员</small><b>{target.name}</b><em>{target.class} · {target.signup_spec}</em></span></div></>}
         <blockquote>{decision.quote}</blockquote>
       </div>
-      {!resolution ? <div className="decision-choice-grid">{decision.choices.map((entry) => <button key={entry.id} className="decision-choice" onClick={() => onChoose(entry.id)}><b>{entry.label}</b><span className="choice-arrow" aria-hidden="true"><i/></span></button>)}</div> : <div className={`decision-outcome action-${resolution.action}`}>
-        <div><small>DECISION RESULT · {resolution.tag}</small><h3>{resolution.headline}</h3><p>{resolution.detail}</p><DecisionEffectTags resolution={resolution}/></div>
+      {!resolution ? <div className="decision-choice-grid">{decision.choices.map((entry) => <button key={entry.id} className="decision-choice" onClick={() => onChoose(entry.id)}><b>{entry.label}</b><span className="choice-arrow" aria-hidden="true"><i/></span></button>)}</div> : <div className={`decision-outcome action-${resolution.action} ${resolution.mediationLevel ? `mediation-${resolution.mediationLevel}` : ''}`}>
+        <div className="decision-outcome-copy">
+          {resolution.preMediation && <div className="decision-result-stage pre-mediation"><small>INITIAL ROLL · {resolution.preMediation.tag}</small><h3>{resolution.preMediation.headline}</h3><p>{resolution.preMediation.detail}</p><DecisionEffectTags resolution={resolution.preMediation}/></div>}
+          {resolution.preMediation && <div className="mediation-transition"><span>调解者介入</span><i>↓</i></div>}
+          <div className={`decision-result-stage ${resolution.preMediation ? 'post-mediation' : ''}`}><small>{resolution.preMediation ? 'MEDIATION RESULT' : 'DECISION RESULT'} · {resolution.tag}</small><h3>{resolution.headline}</h3><p>{resolution.detail}</p><DecisionEffectTags resolution={resolution}/></div>
+        </div>
         <button className="primary large" onClick={onContinue}>{continueLabel} <span>→</span></button>
       </div>}
     </div>
@@ -955,7 +959,7 @@ function CombatMeters({ meters, compact = false }: { meters: CombatMeter[]; comp
   return <div className={`meters-grid ${compact ? 'compact' : ''}`}><div className="meter-panel"><div className="meter-title"><span>DAMAGE</span><b>伤害统计</b></div>{damage.map((meter, index) => row(meter, index))}</div><div className="meter-panel"><div className="meter-title"><span>HEALING</span><b>治疗统计</b></div>{healing.length ? healing.map((meter, index) => row(meter, index, true)) : <p className="no-meter">本次没有治疗专精出战</p>}</div></div>
 }
 
-function decisionEffectLabels(resolution: BossDecisionResolution): string[] {
+function decisionEffectLabels(resolution: BossDecisionOutcomeStage): string[] {
   const labels: string[] = []
   const modifiers = resolution.modifiers
   const signed = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)}`
@@ -983,6 +987,7 @@ function decisionEffectLabels(resolution: BossDecisionResolution): string[] {
     }
   })
   if (modifiers?.leaveRateBonus) labels.push(`退团概率 +${Math.round(modifiers.leaveRateBonus)}%`)
+  if (resolution.action === 'leave') labels.push(`${publicById.get(resolution.leaverId ?? '')?.name ?? '目标'}直接退团`)
   if (resolution.forceNextAttemptWipe) labels.push('下一次尝试直接灭团')
   return labels
 }
@@ -1009,7 +1014,7 @@ function conciseDecisionSummary(resolution: BossDecisionResolution): string {
     : resolution.detail
 }
 
-function DecisionEffectTags({ resolution }: { resolution: BossDecisionResolution }) {
+function DecisionEffectTags({ resolution }: { resolution: BossDecisionOutcomeStage }) {
   const labels = decisionEffectLabels(resolution)
   const tone = (label: string) => /(?:^|\s)-\d/.test(label) ? 'negative' : /(?:^|\s)\+\d/.test(label) ? 'positive' : 'neutral'
   return <div className="decision-effect-tags">{labels.length ? labels.map((label) => <span className={tone(label)} key={label}>{label}</span>) : <span className="no-effect">无额外效果</span>}</div>

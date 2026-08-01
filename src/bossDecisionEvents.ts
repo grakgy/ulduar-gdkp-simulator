@@ -29,18 +29,25 @@ export interface BossDecisionUsage {
   boss: Record<string, BossDecisionEventId[]>
 }
 
-export interface BossDecisionResolution {
+export interface BossDecisionOutcomeStage {
   headline: string
   detail: string
-  summary?: string
   tag: string
   modifiers?: CombatModifiers
   moraleDelta?: number
-  action: 'close' | 'fight' | 'kill' | 'wipe' | 'tech-ending' | 'leave'
+  action?: 'close' | 'fight' | 'kill' | 'wipe' | 'tech-ending' | 'leave'
   responsibleId?: string
   leaverId?: string
   forceNextAttemptWipe?: boolean
   effectScope?: 'current-boss' | 'next-boss'
+}
+
+export interface BossDecisionResolution extends BossDecisionOutcomeStage {
+  summary?: string
+  action: 'close' | 'fight' | 'kill' | 'wipe' | 'tech-ending' | 'leave'
+  preMediation?: BossDecisionOutcomeStage
+  mediationLevel?: 'full' | 'partial'
+  mediationName?: string
 }
 
 const eventChance: Record<BossDecisionEventId, number> = {
@@ -405,15 +412,17 @@ function resolveBossDecisionBase(seed: string, decision: BossDecision, choiceId:
     if (outcome === 0) return { action: 'close', tag: '爆种', headline: `${target}被激出了状态`, detail: `被当众点名后，${target}没有争辩，只在下一把前回了一句：“看数据。”`, modifiers: personal(20, 1.15) }
     if (outcome === 1) return { action: 'close', tag: '发挥失常', headline: `${target}的操作开始变形`, detail: '越想证明自己，手上的节奏越乱。', modifiers: personal(-8, .95) }
     if (outcome === 2) {
+      const base: BossDecisionOutcomeStage = { action: 'close', tag: '当场回喷', headline: `${target}直接把话顶了回去`, detail: `${target}：“你这么会看数据，那你自己来打。”YY里的气氛瞬间降到冰点。`, moraleDelta: -10 }
       const mediation = mediatorResult(seed, decision, 'reply', team)
-      if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}及时截断了争吵`, detail: `${mediation.name}把话题拉回 Boss，双方没有继续增加退团风险。` }
-      if (mediation.level === 'partial') return { action: 'close', tag: '部分缓和', headline: `${mediation.name}勉强把双方劝开`, detail: '火药味还在，但至少没有继续互喷。', moraleDelta: -5 }
-      return { action: 'close', tag: '当场回喷', headline: `${target}直接把话顶了回去`, detail: `${target}：“你这么会看数据，那你自己来打。”YY里的气氛瞬间降到冰点。`, moraleDelta: -10 }
+      if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}及时截断了争吵`, detail: `${mediation.name}把话题拉回 Boss，双方没有继续增加退团风险。`, preMediation: base, mediationLevel: 'full', mediationName: mediation.name }
+      if (mediation.level === 'partial') return { action: 'close', tag: '部分缓和', headline: `${mediation.name}勉强把双方劝开`, detail: '火药味还在，但至少没有继续互喷。', moraleDelta: -5, preMediation: base, mediationLevel: 'partial', mediationName: mediation.name }
+      return { ...base, action: 'close' }
     }
+    const base: BossDecisionOutcomeStage = { action: 'leave', leaverId: targetId, responsibleId: decision.actorId, tag: '心态崩溃', headline: `${target}直接退出了团队`, detail: `${actor}的话音刚落，团队框里就空出了一个位置。` }
     const mediation = mediatorResult(seed, decision, 'leave', team)
-    if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}把人留了下来`, detail: `${target}没有退团，双方先把这件事放到Boss之后再说。` }
-    if (mediation.level === 'partial') return { action: 'close', tag: '勉强留下', headline: `${target}暂时没有点退出`, detail: '人留在团里，心态却还没有完全恢复。', modifiers: { ...personal(-6), leaveRateBonus: 10 } }
-    return { action: 'leave', leaverId: targetId, responsibleId: decision.actorId, tag: '心态崩溃', headline: `${target}直接退出了团队`, detail: `${actor}的话音刚落，团队框里就空出了一个位置。` }
+    if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}把人留了下来`, detail: `${target}没有退团，双方先把这件事放到Boss之后再说。`, preMediation: base, mediationLevel: 'full', mediationName: mediation.name }
+    if (mediation.level === 'partial') return { action: 'close', tag: '勉强留下', headline: `${target}暂时没有点退出`, detail: '人留在团里，心态却还没有完全恢复。', modifiers: { ...personal(-6), leaveRateBonus: 10 }, preMediation: base, mediationLevel: 'partial', mediationName: mediation.name }
+    return { ...base, action: 'leave' }
   }
 
   if (decision.id === 'veteran') {
@@ -492,18 +501,20 @@ function resolveBossDecisionBase(seed: string, decision: BossDecision, choiceId:
     const base = outcome === 1
       ? { morale: -8, mechanics: -5, headline: '复盘变成了互相甩锅', detail: '每个人都能从战斗记录里找出对自己有利的一段。' }
       : { morale: -4, output: .97, healing: .97, headline: '问题没说清，火气倒说出来了', detail: '下一把还没开始，团队已经先消耗了一轮注意力。' }
-    if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}把话题拉回了Boss`, detail: '这次负面效果被及时取消。' }
+    const baseResolution: BossDecisionOutcomeStage = { action: 'close', tag: '争论升级', headline: base.headline, detail: base.detail, moraleDelta: base.morale, modifiers: { teamMechanics: base.mechanics, teamOutputMultiplier: base.output, teamHealingMultiplier: base.healing } }
+    if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}把话题拉回了Boss`, detail: '这次负面效果被及时取消。', preMediation: baseResolution, mediationLevel: 'full', mediationName: mediation.name }
     const scale = mediation.level === 'partial' ? .5 : 1
-    return { action: 'close', tag: mediation.level === 'partial' ? '部分缓和' : '争论升级', headline: base.headline, detail: base.detail, moraleDelta: base.morale * scale, modifiers: { teamMechanics: (base.mechanics ?? 0) * scale, teamOutputMultiplier: 1 + ((base.output ?? 1) - 1) * scale, teamHealingMultiplier: 1 + ((base.healing ?? 1) - 1) * scale } }
+    return { action: 'close', tag: mediation.level === 'partial' ? '部分缓和' : '争论升级', headline: base.headline, detail: base.detail, moraleDelta: base.morale * scale, modifiers: { teamMechanics: (base.mechanics ?? 0) * scale, teamOutputMultiplier: 1 + ((base.output ?? 1) - 1) * scale, teamHealingMultiplier: 1 + ((base.healing ?? 1) - 1) * scale }, ...(mediation.level === 'partial' ? { preMediation: baseResolution, mediationLevel: 'partial' as const, mediationName: mediation.name } : {}) }
   }
 
   const outcome = percentageRoll(random, [35, 35, 30])
   if (outcome === 0) return { action: 'close', tag: '胜负心拉满', headline: '全团都想在下一把证明自己', detail: '火药味变成了执行力，至少这一刻所有人都盯住了 Boss。', moraleDelta: 6, modifiers: { teamMechanics: 3, teamOutputMultiplier: 1.08, teamHealingMultiplier: 1.08 } }
   if (outcome === 1) return { action: 'close', tag: '全员上头', headline: '每个人都憋着证明自己', detail: '输出和治疗会更卖力，但关键机制可能没人愿意先让一步。', modifiers: { teamMechanics: -8, teamOutputMultiplier: 1.1, teamHealingMultiplier: 1.06 } }
+  const base: BossDecisionOutcomeStage = { action: 'close', tag: '火药味失控', headline: '下一把还没开，团队先打起了内战', detail: '没人直接退团，但所有人都开始重新计算继续坐牢是否值得。', moraleDelta: -10, modifiers: { teamOutputMultiplier: .95, teamHealingMultiplier: .95, leaveRateBonus: 5 } }
   const mediation = mediatorResult(seed, decision, 'negative', team)
-  if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}让所有人先闭麦十秒`, detail: '火药味没有继续蔓延，本次负面效果被取消。' }
+  if (mediation.level === 'full') return { action: 'close', tag: '冲突被压住', headline: `${mediation.name}让所有人先闭麦十秒`, detail: '火药味没有继续蔓延，本次负面效果被取消。', preMediation: base, mediationLevel: 'full', mediationName: mediation.name }
   const scale = mediation.level === 'partial' ? .5 : 1
-  return { action: 'close', tag: mediation.level === 'partial' ? '部分缓和' : '火药味失控', headline: '下一把还没开，团队先打起了内战', detail: '没人直接退团，但所有人都开始重新计算继续坐牢是否值得。', moraleDelta: -10 * scale, modifiers: { teamOutputMultiplier: 1 - .05 * scale, teamHealingMultiplier: 1 - .05 * scale, leaveRateBonus: 5 * scale } }
+  return { action: 'close', tag: mediation.level === 'partial' ? '部分缓和' : '火药味失控', headline: base.headline, detail: base.detail, moraleDelta: -10 * scale, modifiers: { teamOutputMultiplier: 1 - .05 * scale, teamHealingMultiplier: 1 - .05 * scale, leaveRateBonus: 5 * scale }, ...(mediation.level === 'partial' ? { preMediation: base, mediationLevel: 'partial' as const, mediationName: mediation.name } : {}) }
 }
 
 function applyResolutionCopy(seed: string, decision: BossDecision, choiceId: BossDecisionChoiceId, resolution: BossDecisionResolution): BossDecisionResolution {

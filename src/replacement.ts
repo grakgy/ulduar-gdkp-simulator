@@ -85,7 +85,7 @@ export function replacementDecision(seed: string, bossId: string, attempt: numbe
   if (departureNumber >= 5) {
     const endReason = activeChannelCount >= 2 ? '臭名昭著' : '组不到人'
     const failureText = activeChannelCount >= 2
-      ? '能问的人脉都已经问遍。江湖上传言进此团等于坐牢，团长此后再也难以组到人了。'
+      ? '能问的人脉都已经问遍。'
       : `${recruiterNames[0] ?? '团长'}继续尝试联系替补，但本局第五次退团后已经没人愿意进组。`
     return { endReason, failureText }
   }

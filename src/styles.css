@@ -556,6 +556,18 @@ main { min-height: calc(100vh - 76px); }
 .decision-outcome { --decision-tone: #b68c42; margin: 24px 38px 30px; min-height: 184px; padding: 30px 34px; display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: center; border: 1px solid #5c4b2c; border-left: 3px solid #c49a44; background: linear-gradient(110deg, #1e1a10, #0d100c 58%, #15130e); box-shadow: inset 36px 0 70px #bb8b240d; }
 .decision-outcome.action-kill { --decision-tone: #73b568; border-left-color: #6ea85d; box-shadow: inset 36px 0 70px #62a3520e; }
 .decision-outcome.action-wipe, .decision-outcome.action-leave, .decision-outcome.action-tech-ending { --decision-tone: #cf5a4f; border-color: #743d34; border-left: 3px solid #c35347; background: linear-gradient(110deg, #241210, #0d0f0c 62%, #17100d); box-shadow: inset 36px 0 70px #a52f260f; }
+.decision-outcome-copy { display: grid; gap: 12px; }
+.decision-result-stage.pre-mediation { padding: 15px 17px; border: 1px solid #60332d; border-left: 3px solid #c05248; background: linear-gradient(100deg, #251210, #0d0f0c 72%); }
+.decision-result-stage.pre-mediation small { color: #c76459; }
+.decision-result-stage.pre-mediation h3 { color: #e6c8c2; font-size: 18px; }
+.mediation-transition { display: flex; align-items: center; gap: 9px; color: #88734b; font: 700 9px 'Roboto Condensed'; letter-spacing: .14em; }
+.mediation-transition::before, .mediation-transition::after { content: ''; height: 1px; flex: 1; background: linear-gradient(90deg, transparent, #665331); }
+.mediation-transition::after { background: linear-gradient(90deg, #665331, transparent); }
+.mediation-transition i { color: #c19a4b; font-style: normal; font-size: 13px; }
+.decision-result-stage.post-mediation { padding: 15px 17px; border: 1px solid #51452f; border-left: 3px solid #bd9343; background: #0b0e0a; }
+.decision-outcome.mediation-full .decision-result-stage.post-mediation { border-color: #36543a; border-left-color: #70aa69; background: linear-gradient(100deg, #102016, #0b0e0a 72%); }
+.decision-outcome.mediation-full .decision-result-stage.post-mediation small { color: #78b370; }
+.decision-outcome.mediation-partial .decision-result-stage.post-mediation { border-left-color: #d1a34f; }
 .decision-outcome small { color: #9a7b3e; font-size: 9px; letter-spacing: .14em; }
 .decision-outcome h3 { margin: 6px 0 8px; color: #efe6d3; font: 700 23px 'Noto Serif SC'; }
 .decision-outcome p { max-width: 700px; margin: 0; color: #9b9c92; font-size: 12px; line-height: 1.75; }
